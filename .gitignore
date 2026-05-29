@@ -1,0 +1,28 @@
+# Python cache and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# Node dependencies and build folders
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# SQLite Database & Session state (CRITICAL SECURITY CRITERIA)
+backend/data/app_data.db
+backend/data/sessions/*.json
+backend/data/uploads/
+*.db
+*.log
+
+# IDEs & System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
