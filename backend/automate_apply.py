@@ -261,6 +261,149 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                         await job_page.wait_for_timeout(2500)
                         continue
                         
+                    # Check for checkboxes inside the chatbot container
+                    checkbox_elements = []
+                    cb_inputs = await container_to_query.query_selector_all("input[type='checkbox']")
+                    for cb in cb_inputs:
+                        if await cb.is_visible():
+                            checkbox_elements.append(cb)
+                    if not checkbox_elements:
+                        custom_cbs = await container_to_query.query_selector_all("[role='checkbox'], [class*='checkbox']")
+                        for cb in custom_cbs:
+                            if await cb.is_visible():
+                                checkbox_elements.append(cb)
+                                
+                    if checkbox_elements:
+                        print(f"    [Chatbot] Detected {len(checkbox_elements)} checkbox options.")
+                        # Read last question for context
+                        question_text = ""
+                        try:
+                            questions = await container_to_query.query_selector_all(".botMsg span, .botItem span, [class*='question'] span, [class*='msg'] span")
+                            if questions:
+                                question_text = await questions[-1].inner_text()
+                        except:
+                            pass
+                        q_lower = question_text.lower()
+                        
+                        clicked_any_cb = False
+                        for cb in checkbox_elements:
+                            cb_text = ""
+                            try:
+                                parent = await cb.evaluate_handle("el => el.parentElement")
+                                cb_text = (await parent.evaluate("el => el.innerText || el.textContent") or "").strip()
+                            except:
+                                pass
+                            if not cb_text:
+                                try:
+                                    cb_text = (await cb.inner_text()).strip()
+                                except:
+                                    pass
+                                    
+                            cb_text_lower = cb_text.lower()
+                            should_check = False
+                            
+                            # Match based on question type
+                            if "categories" in q_lower and ("handled" in q_lower or "purchased" in q_lower or "sourced" in q_lower or "procured" in q_lower):
+                                if "raw materials" in cb_text_lower or "commodities" in cb_text_lower:
+                                    should_check = True
+                            elif "notice period" in q_lower or "notice" in q_lower:
+                                if any(term in cb_text_lower for term in ["immediate", "15 days", "less than", "1 month"]):
+                                    should_check = True
+                            elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower):
+                                if any(term in cb_text_lower for term in ["2", "2 lakhs", "2 lakh", "2 lpa"]):
+                                    should_check = True
+                            elif "expected" in q_lower and ("ctc" in q_lower or "salary" in q_lower):
+                                if any(term in cb_text_lower for term in ["4", "4 lakhs", "4 lakh", "4 lpa", "4-5"]):
+                                    should_check = True
+                            elif "ctc" in q_lower or "salary" in q_lower:
+                                if any(term in cb_text_lower for term in ["4", "4 lakhs", "4 lakh", "4 lpa", "4-5"]):
+                                    should_check = True
+                            elif "experience" in q_lower or "years" in q_lower:
+                                if any(term in cb_text_lower for term in ["1", "one", "1 year", "1-2", "1-2 years"]):
+                                    should_check = True
+                            elif "location" in q_lower or "city" in q_lower:
+                                if any(term in cb_text_lower for term in ["bangalore", "bengaluru", "chennai", "remote"]):
+                                    should_check = True
+                            elif "relocate" in q_lower:
+                                if any(term in cb_text_lower for term in ["yes", "willing", "ready", "agree"]):
+                                    should_check = True
+                            elif "shift" in q_lower:
+                                if any(term in cb_text_lower for term in ["yes", "night", "willing", "ready", "any", "flexible"]):
+                                    should_check = True
+                            elif "travel" in q_lower:
+                                if "percentage" in q_lower or "%" in q_lower:
+                                    if any(term in cb_text_lower for term in ["50%", "60%", "50-60", "50 to 60"]):
+                                        should_check = True
+                                else:
+                                    if any(term in cb_text_lower for term in ["yes", "willing", "ready", "anywhere", "any area"]):
+                                        should_check = True
+                            elif "previously employed" in q_lower or "previously worked" in q_lower:
+                                if any(term in cb_text_lower for term in ["no", "never", "not"]):
+                                    should_check = True
+                            elif any(term in q_lower for term in ["sap", "excel", "willing", "shift", "possess", "relocate", "travel", "join"]):
+                                if any(term in cb_text_lower for term in ["yes", "willing", "agree", "sure", "i have", "i do", "i am", "confirm"]):
+                                    should_check = True
+                                    
+                            # Fallback keyword matching on profile skills/tools/erps
+                            if not should_check:
+                                profile_terms = (profile.get("extracted_skills", []) + 
+                                                 profile.get("extracted_tools", []) + 
+                                                 profile.get("extracted_erps", []))
+                                for term in profile_terms:
+                                    if len(term) > 2 and term.lower() in cb_text_lower:
+                                        should_check = True
+                                        break
+                                        
+                            if should_check:
+                                is_checked = False
+                                try:
+                                    is_checked = await cb.evaluate("el => el.checked")
+                                except:
+                                    try:
+                                        checked_attr = await cb.get_attribute("aria-checked")
+                                        if checked_attr == "true":
+                                            is_checked = True
+                                    except:
+                                        pass
+                                        
+                                if not is_checked:
+                                    print(f"    [Chatbot] Checking option: '{cb_text}'")
+                                    await cb.click(force=True)
+                                    await job_page.wait_for_timeout(1000)
+                                    clicked_any_cb = True
+                                    
+                        if not clicked_any_cb and checkbox_elements:
+                            # Fallback: check first option if nothing matched
+                            print("    [Chatbot] Fallback: No checkbox option matched. Checking first option...")
+                            cb = checkbox_elements[0]
+                            cb_text = ""
+                            try:
+                                parent = await cb.evaluate_handle("el => el.parentElement")
+                                cb_text = (await parent.evaluate("el => el.innerText || el.textContent") or "").strip()
+                            except:
+                                pass
+                            print(f"    [Chatbot] Checking first option: '{cb_text}'")
+                            await cb.click(force=True)
+                            await job_page.wait_for_timeout(1000)
+                            clicked_any_cb = True
+                            
+                        if clicked_any_cb:
+                            # Click Save/Submit button
+                            save_btn = None
+                            for sel in ["button:has-text('Save')", "button:has-text('Submit')", "button:has-text('Apply')", ".saveBtn", "[class*='save']", "[class*='submit']"]:
+                                try:
+                                    el = await container_to_query.query_selector(sel)
+                                    if el and await el.is_visible():
+                                        save_btn = el
+                                        break
+                                except:
+                                    pass
+                            if save_btn:
+                                print("    [Chatbot] Clicking Save/Submit after checkboxes...")
+                                await save_btn.click(force=True)
+                                await job_page.wait_for_timeout(2500)
+                            continue
+
                     # Check for choice chips/options inside the chatbot container
                     options = await container_to_query.query_selector_all("button, div.chip, [class*='option'], [class*='chip'], a")
                     # filter out submit/apply/save/skip/close buttons from options to prevent premature submit clicks
@@ -291,7 +434,10 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                                 opt_text_lower = opt_text.lower()
                                 
                                 should_click = False
-                                if "notice period" in q_lower or "notice" in q_lower:
+                                if "categories" in q_lower and ("handled" in q_lower or "purchased" in q_lower or "sourced" in q_lower or "procured" in q_lower):
+                                    if "raw materials" in opt_text_lower or "commodities" in opt_text_lower:
+                                        should_click = True
+                                elif "notice period" in q_lower or "notice" in q_lower:
                                     if any(term in opt_text_lower for term in ["immediate", "15 days", "less than", "1 month"]):
                                         should_click = True
                                 elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower):
@@ -341,6 +487,16 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                                     elif any(term in opt_text_lower for term in ["yes, i am", "yes, i do", "yes, i'm", "willing to", "ready to"]):
                                         should_click = True
                                         
+                                # Fallback keyword matching on profile skills/tools/erps
+                                if not should_click:
+                                    profile_terms = (profile.get("extracted_skills", []) + 
+                                                     profile.get("extracted_tools", []) + 
+                                                     profile.get("extracted_erps", []))
+                                    for term in profile_terms:
+                                        if len(term) > 2 and term.lower() in opt_text_lower:
+                                            should_click = True
+                                            break
+                                            
                                 if should_click:
                                     print(f"    [Chatbot] Clicking option chip for question '{question_text.strip()}': {opt_text}")
                                     await opt.click(force=True)
