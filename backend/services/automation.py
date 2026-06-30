@@ -3,29 +3,27 @@ import json
 import asyncio
 from datetime import datetime
 
-# Try to import Playwright, mock if not installed (so server doesn't crash on initial install)
+# Try to import Playwright and Camoufox, mock if not installed (so server doesn't crash on initial install)
 try:
     from playwright.async_api import async_playwright
+    from camoufox import AsyncNewBrowser
 except ImportError:
     async_playwright = None
+    AsyncNewBrowser = None
 
 class AutomationEngine:
     def __init__(self):
-        self.playwright_installed = async_playwright is not None
+        self.playwright_installed = (async_playwright is not None) and (AsyncNewBrowser is not None)
         
     async def get_browser_instance(self, headless=False):
         if not self.playwright_installed:
-            raise ImportError("Playwright is not installed. Run 'playwright install' first.")
+            raise ImportError("Playwright or Camoufox is not installed.")
         
         pw = await async_playwright().start()
-        # Using typical recruiter-friendly user agent to avoid bot flags
-        browser = await pw.chromium.launch(
-            headless=headless,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
+        # Launch Firefox using Camoufox anti-detect browser engine
+        browser = await AsyncNewBrowser(pw, headless=headless)
         context = await browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+            viewport={"width": 1280, "height": 800}
         )
         return pw, browser, context
 

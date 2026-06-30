@@ -121,7 +121,7 @@ def calculate_compatibility(profile, job_description, title, location):
     
     return {
         "score": score,
-        "fits": score >= 75,
+        "fits": score >= 65,
         "reasons": reasons,
         "matched_keywords": matched_keywords,
         "missing_keywords": missing_keywords

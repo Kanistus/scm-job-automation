@@ -91,7 +91,10 @@ def init_db():
         "linkedin_creds": json.dumps({"username": "", "password": ""}),
         "naukri_creds": json.dumps({"username": "", "password": ""}),
         "indeed_creds": json.dumps({"username": "", "password": ""}),
-        "foundit_creds": json.dumps({"username": "", "password": ""})
+        "foundit_creds": json.dumps({"username": "", "password": ""}),
+        "telegram_enabled": "false",
+        "telegram_bot_token": "",
+        "telegram_chat_id": ""
     }
     
     for key, val in defaults.items():

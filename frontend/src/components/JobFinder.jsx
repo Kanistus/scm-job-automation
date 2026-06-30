@@ -30,7 +30,7 @@ export default function JobFinder({ jobs, selectedJob, onSelectJob, onImportJob,
       <div className="header-bar">
         <div>
           <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Matched Openings</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>We parsed and matches jobs &gt;75% score from LinkedIn, Indeed, and Naukri. Excluded senior & IT roles.</p>
+          <p style={{ color: 'var(--text-secondary)' }}>We parsed and matches jobs &gt;65% score from LinkedIn, Indeed, and Naukri. Excluded senior & IT roles.</p>
         </div>
       </div>
 

@@ -128,7 +128,7 @@ export default function App() {
     try {
       setLoadingScan(true);
       const res = await api.triggerScan();
-      alert(`Job scan completed! Added ${res.count_found} high-match positions (score >75%) to your feed.`);
+      alert(`Job scan completed! Added ${res.count_found} high-match positions (score >65%) to your feed.`);
       fetchAllData();
     } catch (e) {
       alert("Error running job scan.");
@@ -395,6 +395,75 @@ export default function App() {
                         style={{ width: '80px', padding: '8px', textAlign: 'center' }}
                       />
                     </div>
+
+                  </div>
+                </div>
+
+                {/* 3. Telegram Bot Notifications */}
+                <div>
+                  <h3 style={{ fontSize: '16px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px', marginBottom: '16px' }}>Telegram Bot Notifications</h3>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: 'bold' }}>Enable Telegram Bot</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Listen for commands and send auto-apply notifications</div>
+                      </div>
+                      <label className="switch">
+                        <input 
+                          type="checkbox" 
+                          checked={settings.telegram_enabled === 'true'} 
+                          onChange={e => handleUpdateSetting('telegram_enabled', e.target.checked ? 'true' : 'false')}
+                        />
+                        <span className="slider"></span>
+                      </label>
+                    </div>
+
+                    {settings.telegram_enabled === 'true' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '8px' }}>
+                        <div>
+                          <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Telegram Bot Token</label>
+                          <input 
+                            type="password" 
+                            value={settings.telegram_bot_token || ''} 
+                            onChange={e => handleUpdateSetting('telegram_bot_token', e.target.value)} 
+                            placeholder="Bot Token from @BotFather..." 
+                          />
+                        </div>
+                        
+                        <div>
+                          <label style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Telegram Chat ID</label>
+                          <input 
+                            type="text" 
+                            value={settings.telegram_chat_id || ''} 
+                            onChange={e => handleUpdateSetting('telegram_chat_id', e.target.value)} 
+                            placeholder="Your Personal Chat ID..." 
+                          />
+                        </div>
+
+                        <button 
+                          type="button" 
+                          onClick={async () => {
+                            try {
+                              const res = await fetch('http://localhost:8000/api/telegram/test', { method: 'POST' });
+                              const data = await res.json();
+                              if (res.ok) {
+                                alert("Test message sent successfully! Check Telegram on your phone.");
+                              } else {
+                                alert("Failed to send test message: " + data.detail);
+                              }
+                            } catch (err) {
+                              alert("Error calling backend API: " + err.message);
+                            }
+                          }}
+                          className="btn btn-secondary" 
+                          style={{ marginTop: '4px', alignSelf: 'flex-start' }}
+                        >
+                          Send Test Alert
+                        </button>
+                      </div>
+                    )}
 
                   </div>
                 </div>

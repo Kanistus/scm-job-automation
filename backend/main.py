@@ -25,6 +25,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    try:
+        from services.telegram_bot import start_telegram_bot
+        await start_telegram_bot()
+        print("[Telegram] Bot service started successfully on startup.")
+    except Exception as e:
+        print(f"[Telegram] Failed to start bot service on startup: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    try:
+        from services.telegram_bot import stop_telegram_bot
+        await stop_telegram_bot()
+        print("[Telegram] Bot service stopped successfully on shutdown.")
+    except Exception as e:
+        print(f"[Telegram] Failed to stop bot service on shutdown: {e}")
+
 TEMP_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "uploads")
 os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
 
@@ -71,7 +89,42 @@ async def get_all_settings():
 @app.post("/api/settings")
 async def update_setting_endpoint(request: SettingUpdateRequest):
     db.update_setting(request.key, request.value)
+    
+    # Restart Telegram bot if configuration settings are updated
+    if request.key in ["telegram_enabled", "telegram_bot_token", "telegram_chat_id"]:
+        try:
+            from services.telegram_bot import restart_telegram_bot
+            await restart_telegram_bot()
+        except Exception as e:
+            print(f"[Telegram] Failed to restart bot loop on config change: {e}")
+            
     return {"status": "success", "settings": db.get_settings()}
+
+@app.post("/api/telegram/test")
+async def test_telegram_alert():
+    settings = db.get_settings()
+    token = settings.get("telegram_bot_token", "")
+    chat_id = settings.get("telegram_chat_id", "")
+    
+    if not token or not chat_id:
+        raise HTTPException(status_code=400, detail="Bot Token and Chat ID must be configured before testing.")
+        
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": "🔔 <b>SCM Job Automation Test Alert</b>\n\nYour Telegram Bot integration has been successfully configured and is online!",
+        "parse_mode": "HTML"
+    }
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, json=payload)
+            if response.status_code != 200:
+                raise Exception(f"Telegram returned status code {response.status_code}: {response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send test message: {str(e)}")
+        
+    return {"status": "success", "message": "Test notification delivered successfully!"}
 
 # 2. Profile & Resume Upload Endpoints
 @app.get("/api/profile")

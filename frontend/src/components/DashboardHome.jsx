@@ -58,7 +58,7 @@ export default function DashboardHome({ stats, weeklyTrend, onNavigate, onTrigge
           <div>
             <div className="stat-lbl">Avg Compatibility</div>
             <div className="stat-val">{average_match_score}%</div>
-            <div style={{ fontSize: '11px', color: 'var(--primary)', marginTop: '4px', fontWeight: 'bold' }}>All matches &gt;75%</div>
+            <div style={{ fontSize: '11px', color: 'var(--primary)', marginTop: '4px', fontWeight: 'bold' }}>All matches &gt;65%</div>
           </div>
         </div>
 
@@ -175,7 +175,7 @@ export default function DashboardHome({ stats, weeklyTrend, onNavigate, onTrigge
 
           <div style={{ width: '18%', textAlign: 'center' }}>
             <div style={{ fontSize: '24px', fontWeight: 'bold', color: 'var(--secondary)' }}>{total_identified || 52}</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>High Match (&gt;75%)</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>High Match (&gt;65%)</div>
             <div style={{ height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', marginTop: '12px' }}>
               <div style={{ width: '65%', background: 'var(--secondary)', height: '100%', borderRadius: '2px' }}></div>
             </div>

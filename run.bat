@@ -1,12 +1,12 @@
 @echo off
-title Antigravity JobBot | Job Application Automation Assistant
+title "Antigravity JobBot | Job Application Automation Assistant"
 
 echo =================================================================
 echo        🚀 STARTING ANTIGRAVITY JOB APPLICATION BOT 🚀
 echo =================================================================
 echo.
 
-cd %~dp0
+cd /d "%~dp0"
 
 :: 1. Setup Backend Environment
 echo [*] Checking Backend Python dependencies...
@@ -45,6 +45,6 @@ start http://localhost:5173
 echo.
 echo =================================================================
 echo           🎉 JOBLIST ENGINE AND DASHBOARD RUNNING! 🎉
-echo   Keep this command prompt open to see server & browser activity.
+echo   Keep this command prompt open to see server and browser activity.
 echo =================================================================
 pause

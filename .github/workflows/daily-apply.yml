@@ -1,0 +1,46 @@
+name: Daily Nakuri Automation
+
+on:
+  schedule:
+    # 08:00 IST -> 02:30 UTC (India Standard Time is UTC+5:30)
+    - cron: '30 2 * * *'  # Runs daily at 02:30 UTC which is 08:00 IST
+
+  workflow_dispatch:
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt
+          python -m pip install playwright
+          python -m playwright install chromium
+
+      - name: Decode and write session files
+        env:
+          NAUKRI_SESSION_B64: ${{ secrets.NAUKRI_SESSION_B64 }}
+          INDEED_SESSION_B64: ${{ secrets.INDEED_SESSION_B64 }}
+        run: |
+          mkdir -p backend/data/sessions
+          if [ -n "$NAUKRI_SESSION_B64" ]; then
+            echo "$NAUKRI_SESSION_B64" | base64 --decode > backend/data/sessions/naukri_session.json
+          fi
+          if [ -n "$INDEED_SESSION_B64" ]; then
+            echo "$INDEED_SESSION_B64" | base64 --decode > backend/data/sessions/indeed_session.json
+          fi
+
+      - name: Run automation (headless)
+        env:
+          CI_HEADLESS: 'true'
+        run: |
+          python backend/automate_apply.py
