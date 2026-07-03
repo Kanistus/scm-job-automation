@@ -26,6 +26,64 @@ INDEED_SESSION_PATH = os.path.join(SESSION_DIR, "indeed_session.json")
 
 cancel_requested = False
 
+def get_intelligent_text_answer(q_lower, question_text, profile):
+    """
+    Generates a context-aware, intelligent answer to Naukri/Indeed chatbot
+    text questions based on Kanistus VM's resume, work experience, and preferences.
+    """
+    if "notice period" in q_lower or "notice" in q_lower or "joining" in q_lower or "how soon" in q_lower or "start date" in q_lower:
+        # Check if they want a number or text
+        if any(term in q_lower for term in ["days", "months", "how many", "number"]):
+            return "0"
+        return "Immediate. I can join immediately."
+        
+    elif "relocate" in q_lower or "shift" in q_lower or "travel" in q_lower or "place" in q_lower or "area" in q_lower or "city" in q_lower or "location" in q_lower:
+        # If it's about travel percentage
+        if "travel" in q_lower and ("percentage" in q_lower or "%" in q_lower or "how much" in q_lower):
+            return "50%"
+        # General relocation/remote/location
+        return "Yes, I am fully open to working remotely or relocating to any area/city in India."
+        
+    elif "expected" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower or "lakhs" in q_lower):
+        if any(term in q_lower for term in ["expected ctc", "expected salary", "minimum ctc"]):
+            return "4"
+        return "4 LPA"
+        
+    elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower or "lakhs" in q_lower):
+        return "2"
+        
+    elif "ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower or "lakhs" in q_lower:
+        if "expected" in q_lower or "want" in q_lower or "demand" in q_lower:
+            return "4"
+        return "2"
+        
+    elif "experience" in q_lower or "years" in q_lower or "po" in q_lower or "procurement" in q_lower or "order" in q_lower:
+        if any(x in q_lower for x in ["years", "total", "number", "how many", "how much", "excel", "procurement", "inventory", "sap"]):
+            return "1"
+        return "I have one year of experience as an Inventory Analyst. Please refer to my resume for details."
+        
+    elif "previously employed" in q_lower or "previously worked" in q_lower or "former employee" in q_lower or "ex-employee" in q_lower or "worked here" in q_lower or "worked in this company" in q_lower:
+        return "No"
+        
+    elif "sap" in q_lower or "erp" in q_lower or "system" in q_lower:
+        if any(x in q_lower for x in ["how many", "years", "long"]):
+            return "1"
+        return "I have 1 year of experience using SAP MM and ERP systems for inventory replenishment and cycle count control."
+        
+    elif "excel" in q_lower or "spreadsheet" in q_lower:
+        if any(x in q_lower for x in ["how many", "years", "long"]):
+            return "1"
+        return "Highly proficient in Advanced Excel (XLOOKUP, Pivot Tables, SUMIFS) for SCM reporting and metrics analysis."
+        
+    elif "skills" in q_lower or "tools" in q_lower or "expertise" in q_lower or "strength" in q_lower:
+        return "My core skills include Supply Chain Management, Inventory Optimization, Warehouse Operations, Process Improvement, SAP MM, and Advanced Excel."
+        
+    elif "degree" in q_lower or "education" in q_lower or "graduation" in q_lower or "college" in q_lower or "qualification" in q_lower:
+        return "Bachelor of Electronics and Communication Engineering from St. Xavier's Catholic College of Engineering."
+        
+    # General / Fallback for other questions:
+    return "I have 1 year of experience as an Inventory Analyst specializing in stock auditing, replenishment, and SAP/Excel data reporting. I am open to working remotely or relocating anywhere in India."
+
 async def get_browser_context(pw, session_path, headless=False):
     """
     Launches browser, loading saved login cookies if present.
@@ -228,30 +286,7 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                             pass
                         
                         q_lower = question_text.lower()
-                        answer = "1"
-                        if "notice period" in q_lower or "notice" in q_lower:
-                            answer = "Immediate"
-                        elif "expected" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower):
-                            answer = "4"
-                        elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower):
-                            answer = "2"
-                        elif "ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower:
-                            answer = "4" # default expected
-                        elif "experience" in q_lower or "years" in q_lower or "po" in q_lower or "procurement" in q_lower or "order" in q_lower:
-                            if any(x in q_lower for x in ["years", "total", "number", "how many", "how much", "excel", "procurement", "inventory", "sap"]):
-                                answer = "1"
-                            else:
-                                answer = "one year of experience. I have. If you want more information, you can retrieve it from my resume."
-                        elif "location" in q_lower or "city" in q_lower:
-                            answer = "Bangalore"
-                        elif "travel" in q_lower and ("percentage" in q_lower or "%" in q_lower):
-                            answer = "50%"
-                        elif "relocate" in q_lower or "shift" in q_lower or "travel" in q_lower or "place" in q_lower or "area" in q_lower or "willing to travel" in q_lower:
-                            answer = "Yes"
-                        elif "previously employed" in q_lower or "previously worked" in q_lower or "former employee" in q_lower or "ex-employee" in q_lower or "worked here" in q_lower:
-                            answer = "No"
-                        elif "sap" in q_lower or "excel" in q_lower:
-                            answer = "Yes"
+                        answer = get_intelligent_text_answer(q_lower, question_text, profile)
                             
                         print(f"    [Chatbot] Answering text question '{question_text.strip()}' with: {answer}")
                         await textarea.focus()
