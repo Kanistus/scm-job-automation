@@ -84,10 +84,14 @@ def get_intelligent_text_answer(q_lower, question_text, profile):
     # General / Fallback for other questions:
     return "I have 1 year of experience as an Inventory Analyst specializing in stock auditing, replenishment, and SAP/Excel data reporting. I am open to working remotely or relocating anywhere in India."
 
-async def get_browser_context(pw, session_path, headless=False):
+IS_HEADLESS = os.getenv("CI_HEADLESS", "false").lower() == "true" or os.getenv("CI") is not None
+
+async def get_browser_context(pw, session_path, headless=None):
     """
     Launches browser, loading saved login cookies if present.
     """
+    if headless is None:
+        headless = IS_HEADLESS
     from camoufox import AsyncNewBrowser
     browser = await AsyncNewBrowser(pw, headless=headless)
     
@@ -110,6 +114,10 @@ async def setup_portal_session(platform, login_url, session_path):
     """
     Spawns headed browser for first-time login to save cookies.
     """
+    if os.getenv("CI") or os.getenv("CI_HEADLESS"):
+        print(f"[!] Running in CI environment and session file '{os.path.basename(session_path)}' is missing. Skipping interactive setup.")
+        return
+
     print(f"\n=================================================================")
     print(f"[*] SETTING UP ACTIVE SESSION FOR: {platform.upper()}")
     print(f"=================================================================")
@@ -630,7 +638,7 @@ async def automate_naukri_applications(profile, max_apps=25):
 
     print("\n[*] Starting Naukri Background Auto-Apply Engine...")
     
-    async with AsyncCamoufox(headless=False) as browser:
+    async with AsyncCamoufox(headless=IS_HEADLESS) as browser:
         context = await browser.new_context(storage_state=NAUKRI_SESSION_PATH) if os.path.exists(NAUKRI_SESSION_PATH) else await browser.new_context()
         page = await context.new_page()
         
@@ -919,7 +927,7 @@ async def automate_indeed_applications(profile, max_apps=10):
     global cancel_requested
     print("\n[*] Starting Indeed Background Auto-Apply Engine...")
     
-    async with AsyncCamoufox(headless=False) as browser:
+    async with AsyncCamoufox(headless=IS_HEADLESS) as browser:
         context = await browser.new_context(storage_state=INDEED_SESSION_PATH) if os.path.exists(INDEED_SESSION_PATH) else await browser.new_context()
         page = await context.new_page()
         
@@ -983,10 +991,17 @@ async def automate_indeed_applications(profile, max_apps=10):
 # =================================================================
 
 async def main():
+    db.init_db()
     profile = db.get_profile()
     if not profile:
-        print("[!] Error: Seeder profile not found.")
-        return
+        print("[*] Candidate profile not found in database. Initializing auto-seed...")
+        try:
+            from seed_profile import seed_kanistus_profile
+            seed_kanistus_profile()
+            profile = db.get_profile()
+        except Exception as e:
+            print(f"[!] Error seeding profile: {e}")
+            return
         
     print(f"[+] Loaded Candidate Profile: {profile['name']}")
     
