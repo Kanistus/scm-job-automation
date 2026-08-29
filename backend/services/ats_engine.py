@@ -1,136 +1,199 @@
 import re
 import json
 import os
+import warnings
 try:
-    import google.generativeai as genai
+    from google import genai
+    genai_legacy = False
 except ImportError:
-    genai = None
+    genai_legacy = True
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            import google.generativeai as genai
+    except ImportError:
+        genai = None
 
-# Domain dictionaries
+# Comprehensive Domain keyword database matching candidate's new resume & search objective
 KEYWORDS_DB = {
-    "supply_chain": ["supply chain", "demand forecasting", "replenishment", "procurement", "sourcing", "vendor management", "purchase order", "lead time"],
-    "inventory": ["inventory analyst", "safety stock", "stock auditing", "cycle counting", "inventory accuracy", "carrying cost", "shrinkage", "kpi", "dsi", "fill rate", "otif"],
-    "logistics": ["logistics coordinator", "shipping", "receiving", "distribution", "freight", "transportation", "dispatch", "delivery"],
-    "warehouse": ["warehouse executive", "wms", "warehouse operations", "material handling", "stock replenishment", "goods receipt", "grn"],
-    "tools": ["excel", "advanced excel", "pivot table", "vlookup", "xlookup", "power bi", "tableau", "sql", "vba", "sap", "sap mm", "netsuite", "oracle erp"]
+    "supply_chain": [
+        "supply chain", "logistics", "inventory", "demand planning", "procurement", 
+        "fulfillment", "warehouse", "reverse logistics", "3pl", "sourcing", 
+        "replenishment", "stock auditing", "purchase order", "lead time", "shipping"
+    ],
+    "process_improvement": [
+        "process improvement", "process optimization", "continuous improvement", 
+        "operational excellence", "process excellence", "lean", "six sigma", "kaizen", 
+        "root cause analysis", "rca", "process mapping", "workflow mapping", "sop", 
+        "productivity improvement", "bottleneck", "turnaround time", "cycle time"
+    ],
+    "analytics": [
+        "excel", "advanced excel", "sql", "dashboard", "kpi", "forecasting", 
+        "data analysis", "performance analysis", "reporting", "power bi", "tableau", "metrics", "dsi", "otif"
+    ],
+    "automation": [
+        "automation", "ai", "ai automation", "workflow automation", "process mining", 
+        "digital transformation", "erp", "sap", "sap mm", "wms", "digital supply chain", "technology"
+    ]
 }
+
+PRIORITY_TITLES = [
+    "supply chain analyst", "supply chain process analyst", "supply chain operations analyst",
+    "supply chain improvement analyst", "supply chain excellence analyst", "process improvement analyst",
+    "process excellence analyst", "operations excellence analyst", "operational excellence analyst",
+    "business process analyst", "process analyst", "continuous improvement analyst",
+    "supply chain optimization analyst", "supply chain planning analyst", "logistics process analyst",
+    "supply chain performance analyst", "reverse logistics analyst", "process automation analyst"
+]
+
+SECONDARY_TITLES = [
+    "supply chain associate", "supply chain specialist", "supply chain executive",
+    "operations analyst", "operations specialist", "logistics analyst", "logistics operations analyst",
+    "warehouse operations analyst", "inventory analyst", "inventory optimization analyst",
+    "demand planning analyst", "procurement analyst", "fulfillment analyst",
+    "continuous improvement specialist", "process improvement specialist", "process excellence specialist",
+    "digital supply chain", "supply chain transformation"
+]
+
+EXCLUDED_TERMS = [
+    "inside sales", "business development executive", "telecaller", "field sales", 
+    "customer service representative", "call center", "driver", "delivery rider", 
+    "pure data entry", "manpower supervisor", "software developer", "java developer", 
+    "react", "node.js", "frontend", "backend", "full stack"
+]
 
 def clean_text(text):
     return re.sub(r'\s+', ' ', text.lower().strip())
 
 def calculate_compatibility(profile, job_description, title, location):
     """
-    Calculates job compatibility score (0-100) based on target profile.
-    Rejects/flags jobs with score < 75.
+    Calculates job compatibility score (0-100) based on strict 6-part weighted criteria:
+    1. Supply Chain Relevance (25 pts)
+    2. Process Improvement & Excellence (25 pts)
+    3. Analytics (15 pts)
+    4. Automation / Technology (15 pts)
+    5. Career Growth / Title Fit (10 pts)
+    6. Experience & Location Fit (10 pts)
     """
-    score = 40  # Base score for general domain matching
-    reasons = []
-    missing_keywords = []
-    matched_keywords = []
-    
     jd_clean = clean_text(job_description)
-    title_clean = title.lower()
-    loc_clean = location.lower()
+    title_clean = clean_text(title)
+    loc_clean = clean_text(location)
     
-    # 1. Experience Check (Reject roles requiring 3+ years or senior terms)
-    senior_terms = ["senior", "sr.", "lead", "manager", "director", "vp", "head of", "principal", "chief", "expert", "strategic", "president"]
+    reasons = []
+    matched_keywords = []
+    missing_keywords = []
     
-    # Check title and look for 3+ years experience in the job description
-    has_senior_title = any(term in title_clean for term in senior_terms)
-    has_high_exp = bool(re.search(r'\b[3-9]\+\s*years\b|\b[3-9]\s*-\s*[0-9]\s*years\b|\b[3-9]\s*to\s*[0-9]\s*years\b|\b[3-9]\s*years\s*of\s*experience\b|\brequire\s*[3-9]\s*years\b', jd_clean))
-    
-    is_senior = has_senior_title or has_high_exp
-    
-    if is_senior:
-        score -= 40  # Heavily penalize to ensure it is completely avoided
-        reasons.append("Excluded: Detected senior/managerial role or 3+ years experience requirement which exceeds entry-level preference.")
-    else:
-        reasons.append("Match: Target experience level aligns perfectly (Entry-level / Fresher / 0-2 years).")
-        
-    # Check for software / IT / Sales exclusions
-    unrelated_terms = ["software developer", "java developer", "react", "node.js", "frontend", "backend", "full stack", "inside sales", "business development executive", "telecaller"]
-    if any(term in title_clean for term in unrelated_terms):
-        score -= 40
-        reasons.append("Excluded: Detected unrelated IT/Developer or Direct Sales role.")
+    # 0. Check Rejection Guardrails (-60 pts penalty)
+    is_rejected = any(term in title_clean or term in jd_clean for term in EXCLUDED_TERMS)
+    if is_rejected:
+        return {
+            "score": 15,
+            "fits": False,
+            "reasons": ["Excluded: Role matches generic sales, telecalling, customer support, or non-analytical manual supervision."],
+            "matched_keywords": [],
+            "missing_keywords": ["Supply Chain Process Improvement"]
+        }
 
-    # 2. Location Scoring
-    loc_score = 0
-    if "chennai" in loc_clean:
-        loc_score = 20
-        reasons.append("High Match: Location is Chennai (Priority #1).")
-    elif "bangalore" in loc_clean or "bengaluru" in loc_clean:
-        loc_score = 20
-        reasons.append("High Match: Location is Bangalore (Priority #2).")
-    elif "remote" in loc_clean or "hybrid" in loc_clean:
-        loc_score = 15
-        reasons.append("Match: Remote or Hybrid flexibility.")
-    elif "india" in loc_clean or any(city in loc_clean for city in ["mumbai", "pune", "hyderabad", "delhi", "noida", "gurgaon"]):
-        loc_score = 10
-        reasons.append(f"Acceptable Match: Location is in India ({location}).")
-    else:
-        loc_score = 5
-        reasons.append("Low Match: Location outside immediate preferences.")
-        
-    score += loc_score
-
-    # 3. Domain & Keywords Matching (Max 25 pts)
-    keyword_points = 0
-    total_keywords_to_check = KEYWORDS_DB["supply_chain"] + KEYWORDS_DB["inventory"] + KEYWORDS_DB["logistics"] + KEYWORDS_DB["warehouse"]
-    
-    for kw in total_keywords_to_check:
-        if kw in jd_clean:
+    # 1. Supply Chain Relevance (Max 25 pts)
+    sc_score = 0
+    for kw in KEYWORDS_DB["supply_chain"]:
+        if kw in jd_clean or kw in title_clean:
+            sc_score += 3
             matched_keywords.append(kw.title())
-            if kw in [s.lower() for s in profile.get("extracted_skills", [])]:
-                keyword_points += 2
-            else:
-                missing_keywords.append(kw.title())
-                keyword_points += 1
-                
-    keyword_points = min(keyword_points, 25)
-    score += keyword_points
-    if keyword_points > 15:
-        reasons.append("High Match: Strong overlap in supply chain, inventory, or logistics keywords.")
-    elif keyword_points > 5:
-        reasons.append("Moderate Match: Found relevant domain operations keywords.")
+    sc_score = min(25, sc_score)
+    if sc_score >= 15:
+        reasons.append("High Match: Directly involves Supply Chain, Inventory, 3PL, or Logistics operations (25/25).")
     else:
-        reasons.append("Low Match: Very few industry keywords overlap.")
+        reasons.append("Moderate Match: Partial supply chain domain overlap.")
 
-    # 4. Tools & ERP Check (Max 15 pts)
-    tool_points = 0
-    for tool in KEYWORDS_DB["tools"]:
-        if tool in jd_clean:
-            if tool in [t.lower() for t in profile.get("extracted_tools", [])] or tool in [e.lower() for e in profile.get("extracted_erps", [])]:
-                tool_points += 4
-            else:
-                tool_points += 2
-                missing_keywords.append(tool.upper())
-                
-    tool_points = min(tool_points, 15)
-    score += tool_points
-    if tool_points >= 10:
-        reasons.append("High Match: Strong requirements match for ERP (SAP/Oracle) and analytics tools (Excel/BI).")
+    # 2. Process Improvement & Operational Excellence (Max 25 pts)
+    pi_score = 0
+    for kw in KEYWORDS_DB["process_improvement"]:
+        if kw in jd_clean or kw in title_clean:
+            pi_score += 4
+            matched_keywords.append(kw.title())
+    pi_score = min(25, pi_score)
+    if pi_score >= 16:
+        reasons.append("High Match: Strong focus on Process Improvement, RCA, Six Sigma, and Operational Excellence (25/25).")
+    elif pi_score > 0:
+        reasons.append("Moderate Match: Mentions process optimization or KPI tracking.")
     else:
-        reasons.append("Moderate Match: Some tool matching.")
+        missing_keywords.append("Process Improvement / Lean Six Sigma")
 
-    # Cap score between 0 and 100
-    score = max(0, min(100, score))
-    
-    # Clean duplicates in keywords lists
+    # 3. Analytics & Data Tools (Max 15 pts)
+    an_score = 0
+    for kw in KEYWORDS_DB["analytics"]:
+        if kw in jd_clean or kw in title_clean:
+            an_score += 3
+            matched_keywords.append(kw.title())
+    an_score = min(15, an_score)
+    if an_score >= 9:
+        reasons.append("High Match: Strong alignment with Excel, SQL, KPI dashboards, and data analytics (15/15).")
+
+    # 4. Automation & Technology (Max 15 pts)
+    auto_score = 0
+    for kw in KEYWORDS_DB["automation"]:
+        if kw in jd_clean or kw in title_clean:
+            auto_score += 4
+            matched_keywords.append(kw.title())
+    auto_score = min(15, auto_score)
+    if auto_score >= 8:
+        reasons.append("High Match: Involves AI, process automation, ERP systems (SAP/WMS), or digital transformation.")
+
+    # 5. Career Growth / Priority Title Alignment (Max 10 pts)
+    title_score = 0
+    if any(p_title in title_clean for p_title in PRIORITY_TITLES):
+        title_score = 10
+        reasons.append("Priority Title Match: Directly aligns with Supply Chain + Process Improvement career path.")
+    elif any(s_title in title_clean for s_title in SECONDARY_TITLES):
+        title_score = 7
+        reasons.append("Secondary Title Match: Highly relevant operational role.")
+    else:
+        title_score = 4
+
+    # 6. Experience Fit & Location (Max 10 pts)
+    exp_loc_score = 0
+    if "bengaluru" in loc_clean or "bangalore" in loc_clean:
+        exp_loc_score += 5
+        reasons.append("Location Match: Bengaluru (Priority #1 Location).")
+    elif "remote" in loc_clean or "hybrid" in loc_clean or "chennai" in loc_clean or "india" in loc_clean:
+        exp_loc_score += 4
+        reasons.append(f"Location Match: {location} (Acceptable Indian location).")
+    else:
+        exp_loc_score += 2
+
+    # Check Experience level
+    if any(term in jd_clean or term in title_clean for term in ["0-2", "1-3", "0-3", "entry", "associate", "analyst", "executive", "junior"]):
+        exp_loc_score += 5
+    elif any(term in title_clean for term in ["director", "vp", "head of", "principal", "chief"]):
+        exp_loc_score -= 5
+        reasons.append("Experience Caution: Senior leadership role.")
+    else:
+        exp_loc_score += 3
+
+    total_score = sc_score + pi_score + an_score + auto_score + title_score + exp_loc_score
+    total_score = max(0, min(100, total_score))
+
     matched_keywords = list(set(matched_keywords))
-    missing_keywords = list(set(missing_keywords))[:10]
     
+    # Fill missing keywords list
+    for category in KEYWORDS_DB.values():
+        for kw in category:
+            if kw not in jd_clean and len(missing_keywords) < 8:
+                missing_keywords.append(kw.title())
+
     return {
-        "score": score,
-        "fits": score >= 65,
-        "reasons": reasons,
-        "matched_keywords": matched_keywords,
-        "missing_keywords": missing_keywords
+        "score": total_score,
+        "fits": total_score >= 70,
+        "reasons": list(set(reasons)),
+        "matched_keywords": matched_keywords[:12],
+        "missing_keywords": list(set(missing_keywords))[:8]
     }
 
 def generate_optimized_assets(profile, job, settings):
     """
     Generates customized resume modifications, cover letter, recruiter pitches,
-    and interview prep questions. Supports Gemini API, falls back to local templates.
+    and interview prep tailored to candidate's Flipkart reverse logistics & process improvement background.
     """
     api_key = settings.get("gemini_api_key", "")
     
@@ -141,133 +204,84 @@ def generate_optimized_assets(profile, job, settings):
     
     if api_key and genai:
         try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            prompt = f"""
-            You are an expert ATS (Applicant Tracking System) optimizer and professional recruiter specializing in Supply Chain, Warehouse Operations, Logistics, Procurement, and Demand Planning in India.
-            
-            Candidate's 1-year experience Profile:
-            {json.dumps(profile, indent=2)}
-            
-            Target Job details:
-            Title: {title}
-            Company: {company}
-            Location: {location}
-            Job Description: {jd}
-            
-            Based on this, generate the following 5 assets structured in JSON format with exact keys.
-            Ensure standard professional business tone.
-            
-            JSON Schema:
-            {{
-              "ats_score_improvement": "A paragraph explaining what keywords were injected and why",
-              "optimized_summary": "A highly ATS-compliant professional summary (3-4 sentences) injecting keywords from the job description.",
-              "optimized_experience_bullets": [
-                 "Bullet 1 re-worded with exact matching keywords and 1-year inventory achievements with measurable metrics (e.g. 14% safety stock reduction, 99.2% cycle count accuracy).",
-                 "Bullet 2 re-worded to match job requirements.",
-                 "Bullet 3 re-worded to match job requirements."
-              ],
-              "cover_letter": "A concise, high-converting 3-4 paragraph cover letter customized to this role and company. Mention 1 year experience as an Inventory Analyst, SAP/Excel strengths, and analytical focus.",
-              "recruiter_message": "A short, professional 120-150 word outreach message to a recruiter/hiring manager on LinkedIn.",
-              "interview_prep": {{
-                 "domain_questions": [
-                    {{"question": "Domain question 1", "answer": "Answer explaining inventory KPIs in STAR format"}},
-                    {{"question": "Domain question 2", "answer": "Answer"}},
-                    {{"question": "Domain question 3", "answer": "Answer"}}
-                 ],
-                 "tool_questions": [
-                    {{"question": "Excel/ERP question 1", "answer": "Detailed technical steps/t-codes"}},
-                    {{"question": "Excel/ERP question 2", "answer": "Answer"}}
-                 ]
-              }}
-            }}
-            
-            Respond ONLY with the raw JSON string. Do not include markdown code block formatting (like ```json) or other text.
-            """
-            
-            response = model.generate_content(prompt)
-            # Safe clean for JSON block
-            raw_text = response.text.strip()
+            if not genai_legacy:
+                client = genai.Client(api_key=api_key)
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=f"Optimize ATS resume & cover letter for {title} at {company}. JD: {jd}. Candidate: {json.dumps(profile)}"
+                )
+                raw_text = response.text.strip()
+            else:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content(f"Optimize ATS resume for {title}. Profile: {json.dumps(profile)}")
+                raw_text = response.text.strip()
+                
             if raw_text.startswith("```json"):
                 raw_text = raw_text[7:]
             if raw_text.endswith("```"):
                 raw_text = raw_text[:-3]
-            
             return json.loads(raw_text.strip())
-            
         except Exception as e:
-            print(f"Gemini generation failed, falling back to local engine: {e}")
-            # Fall through to local generation below
-            
-    # LOCAL ENGINE (HEURISTIC TEMPLATES)
-    
-    # 1. Injected keywords
+            print(f"Gemini AI optimization failed, running local engine: {e}")
+
+    # Local Engine (Tailored to Kanistus VM's new Flipkart + Bluewave profile)
     matched_data = calculate_compatibility(profile, jd, title, location)
     missing = matched_data["missing_keywords"][:5]
     
-    injected_str = ", ".join(missing) if missing else "Safety Stock Optimization, Replenishment Cycles"
-    improvement = f"Optimized by injecting high-priority ATS keywords matching this job post: {injected_str}. Improved density of analytical tools and customized accomplishments to stand out."
+    injected_str = ", ".join(missing) if missing else "Process Improvement, Root Cause Analysis, 3PL Coordination"
+    improvement = f"Optimized by injecting high-priority ATS keywords matching '{title}': {injected_str}. Customized achievements from Flipkart reverse logistics and Bluewave inventory operations."
     
-    # 2. Optimized Summary
-    summary = f"Analytical and detail-oriented operations professional with 1 year of hands-on experience in Inventory Management, Logistics, and Supply Chain Analytics. Proficient in executing stock auditing, inventory reconciliation, and tracking KPIs such as OTIF and DSI. Strong command over {', '.join(profile.get('extracted_tools', ['Advanced Excel'])[:3])} and {', '.join(profile.get('extracted_erps', ['SAP ERP'])[:1])} to streamline replenishment cycles and reduce carrying costs for {company}."
+    summary = (
+        f"Supply Chain & Operations Analyst with experience in process improvement, reverse logistics, warehouse operations, "
+        f"and supply chain analytics. Proven track record at Flipkart managing 3PL coordination, return-order workflows, "
+        f"and root-cause analysis. Expert in Advanced Excel, SAP MM, Lean Six Sigma, and AI automation to improve turnaround times for {company}."
+    )
     
-    # 3. Optimized experience bullets
-    orig_bullets = profile.get("experience_summary", {}).get("achievements", [])
-    bullets = []
+    bullets = [
+        f"Managed reverse logistics operations at Flipkart, resolving shipment exceptions, invoice discrepancies, and 3PL pickup delays to improve return turnaround time.",
+        f"Performed root-cause analysis (RCA) and implemented corrective actions to eliminate operational bottlenecks, driving process efficiency across logistics partners.",
+        f"Led 10+ process improvement projects at Bluewave Infotech, deploying a QR-based tracking system that increased inventory accuracy from 85% to 97%."
+    ]
     
-    # We dynamically map or craft new bullets matching standard 1-year achievements
-    bullets.append(f"Optimized inventory levels and cycle counting audits at the warehouse, increasing stock accuracy from 92.5% to 98.8%, resulting in zero stockout discrepancies.")
-    bullets.append(f"Leveraged Advanced Excel (Pivot tables, XLOOKUP) and {profile.get('extracted_erps', ['SAP MM'])[-1] if profile.get('extracted_erps') else 'SAP ERP'} to manage Purchase Orders, improving replenishment cycles and slashing order lead-times by 14%.")
-    bullets.append(f"Monitored key performance metrics including DSI (Days Sales of Inventory) and carrying costs, contributing to a 10% reduction in obsolete stock.")
-    
-    if len(orig_bullets) > 0:
-        # Mix in one of their actual achievements if we parsed it
-        bullets.insert(0, orig_bullets[0])
-        bullets = bullets[:3]
-
-    # 4. Cover Letter
     cover_letter = f"""Dear Hiring Team at {company},
 
-I am writing to express my strong interest in the {title} position currently open at {company}. With 1 year of dedicated experience as an Inventory Analyst, along with a deep interest in supply chain operations, warehouse management, and logistics, I am confident in my ability to add significant value to your analytics team.
+I am writing to express my enthusiastic interest in the {title} role at {company}. With a career focus on Supply Chain Optimization, Process Improvement, and Operations Excellence, I bring hands-on experience from Flipkart (Bengaluru) managing reverse logistics, 3PL partner coordination, and root-cause problem solving.
 
-In my current capacity, I specialize in stock reconciliation, cycle counting audit oversight, and supply chain reporting. I utilize Advanced Excel (including Pivot Tables, SUMIFS, and XLOOKUP) and ERP environments like SAP MM to analyze inventory levels, optimize safety stock thresholds, and maintain over 98.5% inventory record accuracy. I have a track record of identifying bottlenecks in replenishment planning and coordinating with vendor operations to reduce purchase order lead times by 14%.
+In my current position as Executive at Flipkart, I oversee end-to-end return-order processing, monitor operational performance metrics, and execute root-cause analysis to resolve recurring logistics bottlenecks. Previously at Bluewave Infotech, I led 10+ process improvement projects across procurement, warehouse inventory, and dispatch, successfully designing a QR-based tracking system that boosted inventory accuracy from 85% to 97%.
 
-What excites me about joining {company} is your commitment to operational efficiency. My academic background, paired with my analytical capability to track metrics such as OTIF (On-Time In-Full), DSI (Days Sales of Inventory), and shrinkage, aligns perfectly with the demands of this {title} role. I am highly motivated to bring my passion for logistics, demand forecasting, and inventory optimization to your esteemed operations.
+My technical skills span Advanced Excel, SAP MM, Lean Six Sigma principles, and process mapping (BPMN/Workflow mapping). What excites me about {company} is the opportunity to apply data-driven process optimization and automation to strengthen your supply chain operations.
 
-Thank you for your time and consideration. I look forward to the opportunity to discuss how my technical skills and operations experience can support {company}'s strategic goals.
+Thank you for your consideration. I look forward to discussing how my process improvement background can support {company}'s strategic goals.
 
 Sincerely,
-{profile.get('name', 'Candidate Name')}
-{profile.get('email', 'email@candidate.com')} | {profile.get('phone', 'Phone')}"""
+{profile.get('name', 'Kanistus VM')}
+{profile.get('email', 'kanistusvm@gmail.com')} | {profile.get('phone', '+91 6383441249')}
+Bengaluru, Karnataka, India"""
 
-    # 5. Recruiter Pitch
-    rec_pitch = f"Hi [Recruiter Name],\n\nI hope you're doing well. I noticed your posting for the {title} role at {company} and wanted to reach out. I have 1 year of experience as an Inventory Analyst specializing in stock accuracy auditing, safety stock replenishment, and supply chain logistics in India. I have a strong command over SAP MM and Advanced Excel. I've applied through the portal, but wanted to connect directly to express my enthusiasm. I'd love to share how my background in tracking KPIs like OTIF and reducing warehouse carrying costs can benefit {company}. Thank you!\n\nBest regards,\n{profile.get('name', 'Candidate Name')}"
-
-    # 6. Interview Prep
+    rec_pitch = (
+        f"Hi [Recruiter Name],\n\nI noticed your opening for {title} at {company}. "
+        f"I'm a Supply Chain & Process Improvement Analyst with hands-on experience at Flipkart (Bengaluru) "
+        f"in reverse logistics, 3PL coordination, and root-cause analysis. I specialize in Lean Six Sigma, "
+        f"Advanced Excel, and process automation. I've applied via the portal and would love to connect! "
+        f"\n\nBest regards,\nKanistus VM\n+91 6383441249"
+    )
+    
     domain_qs = [
         {
-            "question": "How do you calculate and optimize Safety Stock?",
-            "answer": "Safety Stock = (Max Daily Sales * Max Lead Time in Days) - (Average Daily Sales * Average Lead Time in Days). In my experience, keeping safety stock optimized requires analyzing seasonal demand shifts, supplier reliability (OTIF), and transit lead times to avoid stockouts while keeping holding costs low."
+            "question": "How do you approach Root Cause Analysis (RCA) in supply chain operations?",
+            "answer": "At Flipkart, when encountering recurring return-order delays or address mismatch exceptions, I use the 5 Whys framework and Ishikawa (Fishbone) diagrams to isolate whether issues stem from 3PL courier handoffs, seller labeling errors, or warehouse receiving bottlenecks. Once isolated, I implement corrective SOP updates to eliminate recurring failures."
         },
         {
-            "question": "What inventory KPIs do you prioritize and how do you track them?",
-            "answer": "I focus on: 1) Inventory Turnover Ratio (Cost of Goods Sold / Average Inventory) to check efficiency, 2) Days Sales of Inventory (DSI) to understand stock age, 3) Fill Rate (orders filled on first shipment), and 4) OTIF (On-Time In-Full) to monitor vendor performance. I track these by pulling inventory ledgers into Excel templates and building daily pivot dashboards."
-        },
-        {
-            "question": "Describe a time when you identified a stock discrepancy. How did you resolve it?",
-            "answer": "Situation: During a monthly cycle count, a high-value item showed a 15% discrepancy between physical stock and the ERP ledger.\nTask: Audit the history to resolve the variance.\nAction: I investigated the last 30 days of Goods Receipts (GRN) and warehouse bin transfers. I found a shipment received under the wrong part number code due to vendor labeling error.\nResult: I updated the ERP records, coordinated with the vendor, and implemented a barcode scan verify step, restoring inventory accuracy to 100%."
+            "question": "Describe a process improvement project where you reduced turnaround time.",
+            "answer": "At Bluewave Infotech, I led an initiative to streamline procurement-production-dispatch schedules. By mapping the end-to-end workflow and introducing a QR-based tracking system, we improved inventory accuracy from 85% to 97% and cut order processing cycle times by 14%."
         }
     ]
     
     tool_qs = [
         {
-            "question": "Which SAP transaction codes (T-Codes) did you use for inventory audits?",
-            "answer": "I frequently used MB51 to track material document lists, MMBE to check stock overview across bins/warehouses, LS24 for bin stock status in Warehouse Management, and MB1C / MIGO for post goods movements. These codes are critical for validating real-time inventory levels against physical audits."
-        },
-        {
-            "question": "Can you explain how you would use XLOOKUP and Pivot Tables in inventory analysis?",
-            "answer": "I use XLOOKUP to quickly merge data from separate sheets—for example, mapping a part number in a cycle count list to its price and vendor sheet. I use Pivot Tables to group thousands of stock lines by product category, calculate total carrying value, identify aging slow-moving items, and summarize monthly stock usage trends."
+            "question": "How do you utilize Advanced Excel and ERP systems for operational reporting?",
+            "answer": "I combine SAP MM document queries with Advanced Excel (XLOOKUP, Pivot Tables, SUMIFS) to track inventory DSI, OTIF vendor fulfillment rates, and reverse logistics return volume. This allows real-time visibility into operational bottlenecks."
         }
     ]
 

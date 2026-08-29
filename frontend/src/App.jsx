@@ -94,16 +94,23 @@ export default function App() {
     fetchAllData();
   }, []);
 
+  // Toast Notification System
+  const [toast, setToast] = useState(null);
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   // 1. Resume Operations
   const handleUploadResume = async (file) => {
     try {
       setLoading(true);
       const parsed = await api.uploadResume(file);
       setProfile(parsed);
-      alert("Resume parsed successfully!");
+      showToast("Resume parsed successfully!", "success");
       fetchAllData();
     } catch (e) {
-      alert("Error parsing resume: " + e.message);
+      showToast("Error parsing resume: " + e.message, "error");
     } finally {
       setLoading(false);
     }
@@ -114,10 +121,10 @@ export default function App() {
       setLoading(true);
       const saved = await api.saveProfile(updatedProfile);
       setProfile(saved);
-      alert("Profile competencies saved successfully!");
+      showToast("Profile competencies saved successfully!", "success");
       fetchAllData();
     } catch (e) {
-      alert("Error saving profile.");
+      showToast("Error saving profile.", "error");
     } finally {
       setLoading(false);
     }
@@ -128,10 +135,10 @@ export default function App() {
     try {
       setLoadingScan(true);
       const res = await api.triggerScan();
-      alert(`Job scan completed! Added ${res.count_found} high-match positions (score >65%) to your feed.`);
+      showToast(`Job scan completed! Added ${res.count_found} high-match positions to your feed.`, "success");
       fetchAllData();
     } catch (e) {
-      alert("Error running job scan.");
+      showToast("Error running job scan.", "error");
     } finally {
       setLoadingScan(false);
     }
@@ -141,10 +148,10 @@ export default function App() {
     try {
       setLoadingImport(true);
       const res = await api.pasteJobUrl(url);
-      alert(`Job successfully imported! Match compatibility score is ${res.compatibility.score}%.`);
+      showToast(`Job imported! Compatibility score: ${res.compatibility.score}%.`, "success");
       fetchAllData();
     } catch (e) {
-      alert("Error importing URL: " + e.message);
+      showToast("Error importing URL: " + e.message, "error");
     } finally {
       setLoadingImport(false);
     }
@@ -166,10 +173,10 @@ export default function App() {
       setLoadingOptimize(true);
       const res = await api.optimizeJobAssets(jobId);
       setSelectedJobAssets(res);
-      alert("Resume & cover letter optimized successfully!");
+      showToast("Resume & cover letter optimized successfully!", "success");
       fetchAllData();
     } catch (e) {
-      alert("Error optimizing job assets.");
+      showToast("Error optimizing job assets.", "error");
     } finally {
       setLoadingOptimize(false);
     }
@@ -180,13 +187,13 @@ export default function App() {
       setLoadingApply(true);
       const res = await api.executeApply(jobId, mode);
       if (mode === 'interactive') {
-        alert("Playwright headed session successfully started! Verify fields on your screen and submit.");
+        showToast("Playwright headed session started! Verify fields on your screen.", "info");
       } else {
-        alert("Background auto-apply successful!");
+        showToast("Background auto-apply successful!", "success");
       }
       fetchAllData();
     } catch (e) {
-      alert("Application run error: " + e.message);
+      showToast("Application run error: " + e.message, "error");
     } finally {
       setLoadingApply(false);
     }
@@ -206,8 +213,9 @@ export default function App() {
     try {
       const res = await api.updateSetting(key, val);
       setSettings(res.settings);
+      showToast("Setting saved.", "success");
     } catch (e) {
-      alert("Error saving setting.");
+      showToast("Error saving setting.", "error");
     }
   };
 
@@ -498,6 +506,29 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Floating Toast Notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          zIndex: 99999,
+          padding: '12px 20px',
+          borderRadius: '8px',
+          background: toast.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : toast.type === 'info' ? 'rgba(59, 130, 246, 0.95)' : 'rgba(16, 185, 129, 0.95)',
+          color: '#ffffff',
+          backdropFilter: 'blur(8px)',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+          fontWeight: 500,
+          fontSize: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }

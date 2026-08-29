@@ -1,10 +1,6 @@
-name: Daily Nakuri Automation
+name: Manual Nakuri SCM Job Automation
 
 on:
-  schedule:
-    # 08:00 IST -> 02:30 UTC (India Standard Time is UTC+5:30)
-    - cron: '30 2 * * *'  # Runs daily at 02:30 UTC which is 08:00 IST
-
   workflow_dispatch:
 
 jobs:
@@ -15,7 +11,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -38,8 +34,20 @@ jobs:
             echo "$INDEED_SESSION_B64" | base64 --decode > backend/data/sessions/indeed_session.json
           fi
 
-      - name: Run automation (headless)
+      - name: Run SCM Job Auto-Apply (Headless Cloud Run)
         env:
           CI_HEADLESS: 'true'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python backend/automate_apply.py
+
+      - name: Upload Application Database Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-application-database
+          path: |
+            backend/data/app_data.db
+            scheduler.log

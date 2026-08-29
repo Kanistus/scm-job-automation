@@ -52,18 +52,18 @@ const SAP_TCODES = [
 
 const STAR_CASES = [
   {
-    title: "15% Reduction in Order Lead-Times",
-    s: "At the warehouse, logistics dispatch delays were causing replenishment cycles to drag, resulting in a low OTIF score of 88%.",
-    t: "Identify bottleneck reasons in purchase order release and transit loops, and streamline the logistics process.",
-    a: "I pulled 6 months of vendor transit records into Excel, performed a regression analysis on dispatch loops, and found a 3-day delay in our manual GRN validation. I integrated a quick barcode scanning scan-in step in our ERP workflow.",
-    r: "Slashing manual validation times by 80%, reducing total order lead-time by 15%, and restoring vendor OTIF scores to 97.4%."
+    title: "Flipkart Reverse Logistics RCA & 3PL Optimization",
+    s: "At Flipkart (Bengaluru), return order dispatches and address mismatch exceptions were creating operational bottlenecks across ground ops and 3PL partners.",
+    t: "Perform Root Cause Analysis (RCA) and coordinate across warehouse, ground ops, sellers, and 3PL partners to optimize return turnaround times.",
+    a: "I mapped end-to-end return workflows, executed RCA using 5 Whys to isolate courier handoff delays, and instituted automated exception tracking for address discrepancies.",
+    r: "Reduced return processing cycle times by 18%, eliminated recurring pickup failure exceptions, and restored smooth 3PL fulfillment timelines."
   },
   {
-    title: "Reconciling a 12% Cycle Count Variance",
-    s: "During a major annual stock audit, a critical electronics SKU showed a 12% inventory discrepancy, locking operations.",
-    t: "Locate the discrepancy source and correct our ERP ledgers without interrupting daily warehouse dispatches.",
-    a: "I ran an audit of MB51 material documents and cross-referenced warehouse bins (LS24). I tracked the error to a warehouse transfer slip that was received physically but unposted in the ERP MM system.",
-    r: "Re-posted the transactions, reconciled the ledger back to 100% accuracy, and set up a daily automatic ledger audit email."
+    title: "15% Reduction in Order Lead-Times & 97% Accuracy",
+    s: "At Bluewave Infotech, manual inventory dispatches were causing procurement delays and stockout discrepancies.",
+    t: "Identify bottleneck reasons in purchase order release and transit loops, and streamline the logistics process.",
+    a: "I designed and deployed an ERP-integrated QR tracking system for real-time visibility across procurement, inventory, and dispatch operations.",
+    r: "Boosted inventory accuracy from 85% to 97%, slashed order processing cycle times by 14%, and eliminated stockout discrepancies."
   }
 ];
 

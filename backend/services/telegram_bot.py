@@ -69,7 +69,7 @@ class TelegramBotManager:
         if any(cmd in clean_text for cmd in ["applied", "jobs", "list"]):
             conn = db.get_db_connection()
             rows = conn.execute("""
-                SELECT j.title, j.company, a.date_applied 
+                SELECT j.title, j.company, j.url, a.date_applied 
                 FROM applications a 
                 JOIN jobs j ON a.job_id = j.id 
                 ORDER BY a.id DESC LIMIT 15
@@ -80,10 +80,13 @@ class TelegramBotManager:
                 await self.send_msg(token, chat_id, "ℹ️ No applied jobs found in your database.")
                 return
                 
-            # Request specifies ONLY the job titles
-            msg = "<b>📋 Jobs Applied To:</b>\n\n"
+            msg = "<b>📋 Applied Jobs & Direct Links:</b>\n\n"
             for idx, r in enumerate(rows):
-                msg += f"{idx+1}. {r['title']}\n"
+                url = r['url'] if r['url'] else ""
+                if url:
+                    msg += f"{idx+1}. <b>{r['title']}</b>\n🔗 <a href='{url}'>{url}</a>\n\n"
+                else:
+                    msg += f"{idx+1}. <b>{r['title']}</b>\n\n"
             await self.send_msg(token, chat_id, msg)
             
         # Command 2: Trigger automation run

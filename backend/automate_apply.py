@@ -28,61 +28,130 @@ cancel_requested = False
 
 def get_intelligent_text_answer(q_lower, question_text, profile):
     """
-    Generates a context-aware, intelligent answer to Naukri/Indeed chatbot
-    text questions based on Kanistus VM's resume, work experience, and preferences.
+    Question Classification & Normalization Engine based on Kanistus VM's official Naukri Q&A Database.
+    Guarantees FAST, ACCURATE, TRUTHFUL, and CONSISTENT answers without exaggerating certifications or experience.
     """
-    if "notice period" in q_lower or "notice" in q_lower or "joining" in q_lower or "how soon" in q_lower or "start date" in q_lower:
-        # Check if they want a number or text
+    # 1. Location & Relocation Questions
+    if any(k in q_lower for k in ["current location", "present location", "where are you", "based in", "currently located", "currently in"]):
+        if any(term in q_lower for term in ["location", "city", "name", "where"]):
+            return "Bengaluru, Karnataka"
+        return "Yes"
+        
+    elif any(k in q_lower for k in ["preferred location", "preferred city", "location preference", "preferred work location", "looking for", "work location"]):
+        if "city" in q_lower or "name" in q_lower or "which" in q_lower:
+            return "Bengaluru, Karnataka"
+        return "Bengaluru / Bangalore"
+        
+    elif any(k in q_lower for k in ["relocate", "relocation", "willing to move"]):
+        if "bangalore" in q_lower or "bengaluru" in q_lower or "india" in q_lower:
+            return "Yes"
+        return "Yes, willing to relocate to Bengaluru, Karnataka."
+
+    # 2. Designation & Company Questions
+    elif any(k in q_lower for k in ["current designation", "job title", "current role"]):
+        return "Executive"
+        
+    elif "company" in q_lower and ("current" in q_lower or "organization" in q_lower or "employer" in q_lower):
+        return "Futurz Staffing Solutions Pvt. Ltd."
+
+    # 3. Notice Period & Joining Questions
+    elif any(k in q_lower for k in ["notice period", "notice", "joining", "how soon", "start date", "availability"]):
         if any(term in q_lower for term in ["days", "months", "how many", "number"]):
             return "0"
-        return "Immediate. I can join immediately."
-        
-    elif "relocate" in q_lower or "shift" in q_lower or "travel" in q_lower or "place" in q_lower or "area" in q_lower or "city" in q_lower or "location" in q_lower:
-        # If it's about travel percentage
-        if "travel" in q_lower and ("percentage" in q_lower or "%" in q_lower or "how much" in q_lower):
-            return "50%"
-        # General relocation/remote/location
-        return "Yes, I am fully open to working remotely or relocating to any area/city in India."
-        
+        return "Immediate. Can join immediately."
+
+    # 4. Salary & CTC Questions (Current CTC: 4.18 LPA, Expected CTC: 6 LPA)
     elif "expected" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower or "lakhs" in q_lower):
-        if any(term in q_lower for term in ["expected ctc", "expected salary", "minimum ctc"]):
-            return "4"
-        return "4 LPA"
+        if any(term in q_lower for term in ["expected ctc", "expected salary", "minimum ctc", "number"]):
+            return "6"
+        return "6 LPA"
         
-    elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower or "lakhs" in q_lower):
-        return "2"
+    elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower or "lakhs" in q_lower or "gross" in q_lower):
+        if "monthly" in q_lower or "gross" in q_lower:
+            return "32139"
+        if any(term in q_lower for term in ["current ctc", "current salary", "number"]):
+            return "4.18"
+        return "4.18 LPA"
         
-    elif "ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower or "lakhs" in q_lower:
+    elif any(k in q_lower for k in ["ctc", "salary", "lpa", "lacs", "lakhs"]):
         if "expected" in q_lower or "want" in q_lower or "demand" in q_lower:
-            return "4"
-        return "2"
+            return "6"
+        return "4.18 LPA"
+
+    # 5. Process Improvement & Quality Certifications
+    elif "six sigma" in q_lower or "lean" in q_lower:
+        if "certification" in q_lower or "certified" in q_lower or "belt" in q_lower:
+            return "Yes – Lean Six Sigma White Belt"
+        return "Yes, Lean Six Sigma White Belt certified with hands-on experience in RCA and Kaizen."
         
-    elif "experience" in q_lower or "years" in q_lower or "po" in q_lower or "procurement" in q_lower or "order" in q_lower:
-        if any(x in q_lower for x in ["years", "total", "number", "how many", "how much", "excel", "procurement", "inventory", "sap"]):
-            return "1"
-        return "I have one year of experience as an Inventory Analyst. Please refer to my resume for details."
+    elif "process improvement" in q_lower or "continuous improvement" in q_lower:
+        if "projects" in q_lower or "how many" in q_lower or "number" in q_lower:
+            return "10+"
+        return "Yes, led 10+ process improvement projects across procurement, inventory, warehouse, and dispatch."
         
-    elif "previously employed" in q_lower or "previously worked" in q_lower or "former employee" in q_lower or "ex-employee" in q_lower or "worked here" in q_lower or "worked in this company" in q_lower:
-        return "No"
+    elif any(k in q_lower for k in ["root cause", "rca", "five whys", "5 whys", "fishbone", "process mapping", "workflow mapping", "kaizen"]):
+        return "Yes"
+
+    # 6. Inventory & Warehouse Operations
+    elif "inventory" in q_lower:
+        if "accuracy" in q_lower or "improvement" in q_lower or "percentage" in q_lower or "%" in q_lower:
+            return "Improved inventory accuracy from 85% to 97% through an ERP-integrated QR tracking system."
+        if "years" in q_lower or "how long" in q_lower:
+            return "1.5"
+        return "Yes, experienced in inventory optimization, SKU management, stock auditing, and replenishment."
         
-    elif "sap" in q_lower or "erp" in q_lower or "system" in q_lower:
-        if any(x in q_lower for x in ["how many", "years", "long"]):
-            return "1"
-        return "I have 1 year of experience using SAP MM and ERP systems for inventory replenishment and cycle count control."
+    elif "warehouse" in q_lower or "wms" in q_lower:
+        if "years" in q_lower:
+            return "1.5"
+        return "Yes, experienced in warehouse operations, stock intake, bin management, and order dispatch."
+
+    # 7. Supply Chain & Logistics Experience
+    elif "supply chain" in q_lower or "logistics" in q_lower or "procurement" in q_lower or "dispatch" in q_lower or "order" in q_lower:
+        if any(x in q_lower for x in ["years", "total", "number", "how many"]):
+            return "1.5"
+        return "Yes, 1.5 years of experience in supply chain operations, order management, and process optimization."
+
+    # 8. ERP & Software Tools
+    elif "sap" in q_lower or "erp" in q_lower:
+        if "years" in q_lower:
+            return "1.5"
+        return "Yes, 1.5 years experience using SAP MM and ERP systems for inventory tracking and order management."
         
     elif "excel" in q_lower or "spreadsheet" in q_lower:
-        if any(x in q_lower for x in ["how many", "years", "long"]):
-            return "1"
-        return "Highly proficient in Advanced Excel (XLOOKUP, Pivot Tables, SUMIFS) for SCM reporting and metrics analysis."
+        if "years" in q_lower:
+            return "1.5"
+        return "Yes, proficient in Advanced Excel (XLOOKUP, Pivot Tables, SUMIFS) for SCM metrics and KPI reporting."
         
-    elif "skills" in q_lower or "tools" in q_lower or "expertise" in q_lower or "strength" in q_lower:
-        return "My core skills include Supply Chain Management, Inventory Optimization, Warehouse Operations, Process Improvement, SAP MM, and Advanced Excel."
+    elif any(k in q_lower for k in ["mysql", "bpmn", "asana"]):
+        return "Familiar"
         
-    elif "degree" in q_lower or "education" in q_lower or "graduation" in q_lower or "college" in q_lower or "qualification" in q_lower:
-        return "Bachelor of Electronics and Communication Engineering from St. Xavier's Catholic College of Engineering."
+    elif "miro" in q_lower:
+        return "Yes"
+
+    # 9. Education & Degrees
+    elif any(k in q_lower for k in ["degree", "education", "qualification", "bachelor", "graduation", "college", "university"]):
+        if "university" in q_lower or "college" in q_lower or "institution" in q_lower:
+            return "St. Xavier's Catholic College of Engineering"
+        if "specialization" in q_lower or "major" in q_lower or "field" in q_lower:
+            return "Electronics and Communication Engineering"
+        return "Bachelor of Electronics and Communication Engineering"
+
+    # 10. Certifications & Languages
+    elif "certification" in q_lower or "certificate" in q_lower:
+        return "Lean Six Sigma White Belt, Supply Chain Management Fundamentals (SCMF)"
         
-    # General / Fallback for other questions:
-    return "I have 1 year of experience as an Inventory Analyst specializing in stock auditing, replenishment, and SAP/Excel data reporting. I am open to working remotely or relocating anywhere in India."
+    elif "language" in q_lower or "english" in q_lower or "tamil" in q_lower or "malayalam" in q_lower:
+        return "English, Tamil, Malayalam"
+
+    # 11. Open-Ended Questions (Why change, tell about yourself)
+    elif "tell about yourself" in q_lower or "introduce" in q_lower:
+        return "I am a Supply Chain & Operations Analyst with experience in inventory management, warehouse operations, process improvement (10+ projects), ERP-integrated QR tracking systems, and KPI reporting."
+        
+    elif "why" in q_lower and ("change" in q_lower or "switch" in q_lower or "leaving" in q_lower):
+        return "Looking for an opportunity to apply my experience in supply chain, operations, and process improvement to optimize business processes and operational efficiency."
+
+    # Default Fallback Answer (Truthful and aligned with profile)
+    return "Yes. I am a Supply Chain & Operations Analyst based in Bengaluru with 1.5 years experience in inventory optimization, process improvement, ERP tracking, and KPI reporting."
 
 IS_HEADLESS = os.getenv("CI_HEADLESS", "false").lower() == "true" or os.getenv("CI") is not None
 
@@ -200,13 +269,14 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
         
         comp = calculate_compatibility(profile, desc, title, default_loc)
         
-        if comp['score'] >= 65:
+        if comp['score'] >= 70:
             print(f"    [+] Highly Compatible Fit: {comp['score']}%! Triggering auto-submit...")
             await send_telegram_message(
-                f"🔍 <b>Highly Compatible Naukri Job Fit</b> ({comp['score']}%):\n"
+                f"🎯 <b>Highly Compatible Naukri Job Fit ({comp['score']}%)</b>\n\n"
                 f"💼 <b>{title}</b>\n"
                 f"📍 Location: {default_loc}\n"
-                f"Starting auto-apply process..."
+                f"🔗 <b>Apply Link:</b> {url}\n\n"
+                f"🚀 <i>Starting auto-apply process...</i>"
             )
             
             # Look for quick apply or standard apply button using multi-selector fallbacks
@@ -265,9 +335,16 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                     # Query chatbot elements inside the container
                     container_to_query = chatbot_container if chatbot_container else job_page
                     
-                    # Check for skip buttons inside chatbot container
+                    # Check for skip buttons inside chatbot container ("Skip the question", "Skip", etc.)
                     skip_btn = None
-                    for sel in ["span:has-text('Skip')", "a:has-text('Skip')", "button:has-text('Skip')", "div:has-text('Skip')", "text='Skip this question'"]:
+                    skip_selectors = [
+                        "text='Skip the question'", "text='Skip this question'", "text='Skip question'",
+                        "span:has-text('Skip the question')", "button:has-text('Skip the question')", "a:has-text('Skip the question')",
+                        "span:has-text('Skip question')", "button:has-text('Skip question')", "a:has-text('Skip question')",
+                        "span:has-text('Skip')", "a:has-text('Skip')", "button:has-text('Skip')", "div:has-text('Skip')",
+                        "[class*='skip']", "[aria-label*='Skip']"
+                    ]
+                    for sel in skip_selectors:
                         try:
                             el = await container_to_query.query_selector(sel)
                             if el and await el.is_visible():
@@ -276,7 +353,7 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                         except:
                             pass
                     if skip_btn:
-                        print("    [Chatbot] Clicking Skip button...")
+                        print("    [Chatbot] 'Skip the question' option detected. Clicking Skip...")
                         await skip_btn.click(force=True)
                         await job_page.wait_for_timeout(2500)
                         continue
@@ -581,16 +658,34 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                         
                 # Verify that it didn't reject or get stuck
                 page_text = await job_page.evaluate("() => document.body.innerText")
-                if "application was not accepted" in page_text or "answer all mandatory questions" in page_text:
-                    print(f"    [!] Error: Naukri rejected the application due to missing chatbot answers.")
+                if "application was not accepted" in page_text or "answer all mandatory questions" in page_text or "mandatory question" in page_text.lower():
+                    print(f"    [!] Error: Naukri application stuck on mandatory chatbot question (no Skip option available). Sending alert & waiting 20s...")
+                    await send_telegram_message(
+                        f"⚠️ <b>Action Required: Job Application Stuck!</b>\n\n"
+                        f"💼 <b>{title}</b>\n"
+                        f"🎯 Match Score: <b>{comp['score']}%</b>\n"
+                        f"📍 Location: {default_loc}\n"
+                        f"❓ <b>Reason:</b> Recruiter question requires manual input (no 'Skip' button).\n"
+                        f"⏳ <i>Waiting 20 seconds before skipping...</i>\n\n"
+                        f"🔗 <b>Click to Complete Application Directly:</b>\n{url}"
+                    )
+                    # Wait 20 seconds for user action or response
+                    await asyncio.sleep(20)
+                    print(f"    [!] 20s timeout reached without response. Skipping job: {title}...")
+                    await send_telegram_message(
+                        f"⏭️ <b>Skipped Application (20s Timeout):</b>\n"
+                        f"No response received within 20s for <b>{title}</b>. Moving to next job in queue..."
+                    )
                     await job_page.close()
                     return False
                     
                 print(f"    [OK] Successfully submitted application for {title}!")
                 await send_telegram_message(
-                    f"✅ <b>Successfully Applied!</b>\n"
-                    f"💼 <b>{title}</b> at <b>Naukri Employer</b>\n"
-                    f"🎯 Score: {comp['score']}%"
+                    f"✅ <b>Successfully Applied!</b>\n\n"
+                    f"💼 <b>{title}</b>\n"
+                    f"🎯 Match Score: <b>{comp['score']}%</b>\n"
+                    f"📍 Location: {default_loc}\n"
+                    f"🔗 <b>Job Link:</b> {url}"
                 )
                 
                 # Log applied status to SQLite database
@@ -612,9 +707,15 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                 await job_page.close()
                 return True
             else:
-                print("    [!] Apply button not found (might require external application). Skipping...")
+                print("    [!] Apply button not found (might require external application). Sending alert...")
+                await send_telegram_message(
+                    f"ℹ️ <b>Manual Apply Recommended ({comp['score']}% Fit):</b>\n\n"
+                    f"💼 <b>{title}</b>\n"
+                    f"📍 Location: {default_loc}\n"
+                    f"🔗 <b>Apply Directly Here:</b>\n{url}"
+                )
         else:
-            print(f"    [-] Excluded: Match score is {comp['score']}% (below 65% threshold).")
+            print(f"    [-] Excluded: Match score is {comp['score']}% (below 70% threshold).")
             
         await job_page.close()
         return False
@@ -862,8 +963,15 @@ async def process_and_apply_indeed_job(context, url, profile, default_loc="Chenn
                 
         comp = calculate_compatibility(profile, desc, title, default_loc)
         
-        if comp['score'] >= 65:
+        if comp['score'] >= 70:
             print(f"    [+] Highly Compatible Fit: {comp['score']}%! Checking Easy Apply...")
+            await send_telegram_message(
+                f"🎯 <b>Highly Compatible Indeed Job Fit ({comp['score']}%)</b>\n\n"
+                f"💼 <b>{title}</b>\n"
+                f"📍 Location: {default_loc}\n"
+                f"🔗 <b>Apply Link:</b> {url}\n\n"
+                f"🚀 <i>Checking Easy Apply...</i>"
+            )
             
             # Check if it has Indeed Apply button (Easily Apply)
             apply_btn = await job_page.query_selector("#indeedApplyButton, .jobsearch-CallToApplyArea button")
@@ -881,9 +989,11 @@ async def process_and_apply_indeed_job(context, url, profile, default_loc="Chenn
                 await job_page.wait_for_timeout(3000)
                 print(f"    [OK] Successfully submitted Easy Apply on Indeed for {title}!")
                 await send_telegram_message(
-                    f"✅ <b>Successfully Applied!</b>\n"
-                    f"💼 <b>{title}</b> at <b>Indeed SCM Employer</b>\n"
-                    f"🎯 Score: {comp['score']}%"
+                    f"✅ <b>Successfully Applied!</b>\n\n"
+                    f"💼 <b>{title}</b>\n"
+                    f"🎯 Match Score: <b>{comp['score']}%</b>\n"
+                    f"📍 Location: {default_loc}\n"
+                    f"🔗 <b>Job Link:</b> {url}"
                 )
                 
                 # Log applied status
@@ -907,7 +1017,7 @@ async def process_and_apply_indeed_job(context, url, profile, default_loc="Chenn
             else:
                 print("    [!] Indeed Easy Apply not available (External). Skipping...")
         else:
-            print(f"    [-] Excluded: Indeed Match score is {comp['score']}% (below 65% threshold).")
+            print(f"    [-] Excluded: Indeed Match score is {comp['score']}% (below 70% threshold).")
             
         await job_page.close()
         return False

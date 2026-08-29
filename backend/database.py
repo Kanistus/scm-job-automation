@@ -31,6 +31,12 @@ def init_db():
         name TEXT,
         email TEXT,
         phone TEXT,
+        current_company TEXT,
+        current_designation TEXT,
+        current_location TEXT,
+        current_ctc TEXT,
+        expected_ctc TEXT,
+        notice_period TEXT,
         target_roles TEXT,          -- JSON list of roles
         preferred_locations TEXT,   -- JSON list of locations
         master_resume_text TEXT,
@@ -43,6 +49,13 @@ def init_db():
         education TEXT               -- JSON details
     )
     """)
+    
+    # Auto-migrate profile columns if table exists
+    for col in ["current_company", "current_designation", "current_location", "current_ctc", "expected_ctc", "notice_period"]:
+        try:
+            cursor.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
+        except Exception:
+            pass
     
     # 3. Job Postings Table
     cursor.execute("""
@@ -249,13 +262,14 @@ def get_application_details(job_id):
     if row:
         app_dict = dict(row)
         for field in ["interview_rounds", "follow_up_dates", "interview_prep_questions", "star_answers", "hr_contact"]:
+            default_val = {} if field == "hr_contact" else []
             if app_dict.get(field):
                 try:
                     app_dict[field] = json.loads(app_dict[field])
                 except Exception:
-                    app_dict[field] = [] if "dates" in field or "rounds" in field else {}
+                    app_dict[field] = default_val
             else:
-                app_dict[field] = [] if "dates" in field or "rounds" in field else {}
+                app_dict[field] = default_val
         return app_dict
     return None
 
