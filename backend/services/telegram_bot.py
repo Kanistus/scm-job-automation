@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import time
 import logging
 import httpx
 import re
@@ -199,9 +200,11 @@ class TelegramBotManager:
                 # Import main application sweep tasks
                 from automate_apply import automate_naukri_applications, automate_indeed_applications
                 
+                sweep_start = time.time()
+
                 # 1. Run Naukri sweep
-                await self.send_msg(token, chat_id, "🔍 <i>Scanning Naukri SCM jobs...</i>")
-                naukri_count = await automate_naukri_applications(profile, max_apps=25)
+                await self.send_msg(token, chat_id, "🔍 <i>Scanning Naukri SCM jobs (7s pacing, 30m max limit)...</i>")
+                naukri_count = await automate_naukri_applications(profile, max_apps=25, start_time=sweep_start)
                 await self.send_msg(token, chat_id, f"✅ Naukri sweep complete! Applied to <b>{naukri_count}</b> jobs.")
                 
                 # 2. Run Indeed sweep
@@ -209,13 +212,14 @@ class TelegramBotManager:
                 indeed_session = os.path.join(parent_dir, "data", "sessions", "indeed_session.json")
                 if os.path.exists(indeed_session):
                     await self.send_msg(token, chat_id, "🔍 <i>Scanning Indeed SCM jobs...</i>")
-                    indeed_count = await automate_indeed_applications(profile, max_apps=10)
+                    indeed_count = await automate_indeed_applications(profile, max_apps=10, start_time=sweep_start)
                     await self.send_msg(token, chat_id, f"✅ Indeed sweep complete! Applied to <b>{indeed_count}</b> jobs.")
                 else:
                     await self.send_msg(token, chat_id, "ℹ️ Indeed session not found. Skipping Indeed sweep.")
                 
                 total = naukri_count + indeed_count
-                await self.send_msg(token, chat_id, f"🎯 <b>Auto-apply sweep completed successfully!</b> Total jobs applied: {total}")
+                total_min = round((time.time() - sweep_start) / 60, 1)
+                await self.send_msg(token, chat_id, f"🎯 <b>Auto-apply sweep completed!</b> Total jobs applied: {total} (Duration: {total_min}m | Max Limit: 30m)")
                 
             except Exception as e:
                 import traceback

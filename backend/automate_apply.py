@@ -2,6 +2,7 @@ import asyncio
 import sys
 import os
 import json
+import time
 from datetime import datetime
 
 # Configure UTF-8 encoding on Windows to prevent Errno 22 and UnicodeEncodeError
@@ -11,6 +12,10 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+# Timing & Pacing Configuration (7s page gap & 30-minute maximum total sweep time)
+PAGE_GAP_SECONDS = 7
+MAX_RUN_TIME_SECONDS = 30 * 60  # 30 minutes total execution limit
 
 # Include backend path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -268,7 +273,7 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
         print(f"[*] Inspecting job details: {url}")
         job_page = await context.new_page()
         await job_page.goto(url, wait_until="commit", timeout=25000)
-        await job_page.wait_for_timeout(2000)
+        await job_page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
         
         # Gather details for scoring using multi-selector fallbacks
         title = ""
@@ -750,8 +755,7 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                     "job_id": job_id,
                     "date_applied": datetime.now().strftime("%Y-%m-%d")
                 })
-                await job_page.close()
-                return True
+                applied_success = True
             else:
                 print("    [!] Apply button not found (might require external application). Sending alert...")
                 await send_telegram_message(
@@ -760,30 +764,38 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                     f"📍 Location: {default_loc}\n"
                     f"🔗 <b>Apply Directly Here:</b>\n{url}"
                 )
+                applied_success = False
         else:
             print(f"    [-] Excluded: Match score is {comp['score']}% (below 70% threshold).")
+            applied_success = False
             
-        await job_page.close()
-        return False
+        return applied_success
     except Exception as e:
         print(f"    [!] Error processing job {url}: {e}")
+        return False
+    finally:
         if job_page:
             try:
                 await job_page.close()
             except:
                 pass
-        return False
+        print(f"    [*] Pacing delay: waiting {PAGE_GAP_SECONDS}s before next page...")
+        await asyncio.sleep(PAGE_GAP_SECONDS)
 
-async def automate_naukri_applications(profile, max_apps=25):
+async def automate_naukri_applications(profile, max_apps=25, start_time=None):
     """
     Background automation to search, score, and auto-apply to Naukri jobs.
+    Enforces 7s page gap and maximum 30-minute total execution limit.
     """
     global cancel_requested
+    if start_time is None:
+        start_time = time.time()
+        
     if not os.path.exists(NAUKRI_SESSION_PATH):
         print("[!] Naukri session not found. Setting up session first...")
         await setup_portal_session("Naukri", "https://www.naukri.com/nlogin/login", NAUKRI_SESSION_PATH)
 
-    print("\n[*] Starting Naukri Background Auto-Apply Engine...")
+    print(f"\n[*] Starting Naukri Background Auto-Apply Engine (Max Runtime: {MAX_RUN_TIME_SECONDS // 60}m)...")
     
     async with get_camoufox_browser(headless=IS_HEADLESS) as browser:
         context = await browser.new_context(storage_state=NAUKRI_SESSION_PATH) if os.path.exists(NAUKRI_SESSION_PATH) else await browser.new_context()
@@ -800,7 +812,7 @@ async def automate_naukri_applications(profile, max_apps=25):
             print("\n[*] STEP 1: Crawling personalized Recommended Jobs page...")
             rec_url = "https://www.naukri.com/recommendedjobs"
             await page.goto(rec_url, wait_until="commit", timeout=25000)
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
             
             # Extract recommended job card links using multi-selectors
             rec_cards = []
@@ -824,6 +836,9 @@ async def automate_naukri_applications(profile, max_apps=25):
                 if cancel_requested:
                     print("[!] Cancellation requested. Stopping Naukri Recommended sweep...")
                     break
+                if time.time() - start_time >= MAX_RUN_TIME_SECONDS:
+                    print(f"[*] Reached {MAX_RUN_TIME_SECONDS // 60}-minute running limit during Recommended sweep. Stopping...")
+                    break
                 if applied_count >= max_apps:
                     break
                 if url in applied_urls:
@@ -836,16 +851,16 @@ async def automate_naukri_applications(profile, max_apps=25):
             print(f"[!] Warning: Could not complete Recommended Jobs scan: {e}")
 
         # B. SECOND RUN: NAVIGATE AND APPLY TO STANDARD SEARCH QUERIES
-        if applied_count < max_apps and not cancel_requested:
+        if applied_count < max_apps and not cancel_requested and (time.time() - start_time < MAX_RUN_TIME_SECONDS):
             print("\n[*] STEP 2: Running standard SCM search queries...")
             for role in profile['target_roles']:
-                if cancel_requested:
+                if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                     break
                 for loc in profile['preferred_locations']:
-                    if cancel_requested:
+                    if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                         break
                     for exp in [0, 1, 2]:
-                        if cancel_requested:
+                        if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                             break
                         if applied_count >= max_apps:
                             break
@@ -856,7 +871,7 @@ async def automate_naukri_applications(profile, max_apps=25):
                         print(f"[*] Navigating search query: {search_url}")
                         try:
                             await page.goto(search_url, wait_until="commit", timeout=25000)
-                            await page.wait_for_timeout(3000)
+                            await page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
                         except Exception as e:
                             print(f"[!] Warning: Connection timeout/drop on {search_url}. Skipping this query... {e}")
                             continue
@@ -880,8 +895,8 @@ async def automate_naukri_applications(profile, max_apps=25):
                         print(f"[*] Identified {len(urls)} job leads in this query.")
                         
                         for url in urls:
-                            if cancel_requested:
-                                print("[!] Cancellation requested. Stopping Naukri Search sweep...")
+                            if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
+                                print("[!] Reached 30-minute limit or cancellation requested. Stopping Naukri Search sweep...")
                                 break
                             if applied_count >= max_apps:
                                 break
@@ -892,7 +907,8 @@ async def automate_naukri_applications(profile, max_apps=25):
                             if success:
                                 applied_count += 1
                                 
-        print(f"[*] Naukri run complete. Applied to {applied_count} jobs.")
+        elapsed_min = round((time.time() - start_time) / 60, 1)
+        print(f"[*] Naukri run complete in {elapsed_min}m. Applied to {applied_count} jobs.")
         return applied_count
 
 # =================================================================
@@ -978,7 +994,7 @@ async def process_and_apply_indeed_job(context, url, profile, default_loc="Chenn
         print(f"[*] Inspecting Indeed job details: {url}")
         job_page = await context.new_page()
         await job_page.goto(url, wait_until="commit", timeout=25000)
-        await job_page.wait_for_timeout(2000)
+        await job_page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
         await handle_cloudflare_challenge(job_page)
         
         # Title
@@ -999,15 +1015,14 @@ async def process_and_apply_indeed_job(context, url, profile, default_loc="Chenn
             is_in_days = any(term in age_text_lower for term in ["day", "days", "hour", "hours", "just posted", "today"])
             if not is_in_days:
                 print(f"    [!] Indeed job age is not fresh/in days ({age_text.strip()}). Skipping...")
-                await job_page.close()
                 return False
                 
             if any(f"{d} day" in age_text_lower for d in range(6, 31)) or "30+ day" in age_text_lower or "month" in age_text_lower:
                 print(f"    [!] Indeed job is old ({age_text.strip()}). Skipping...")
-                await job_page.close()
                 return False
                 
         comp = calculate_compatibility(profile, desc, title, default_loc)
+        applied_success = False
         
         if comp['score'] >= 70:
             print(f"    [+] Highly Compatible Fit: {comp['score']}%! Checking Easy Apply...")
@@ -1028,7 +1043,6 @@ async def process_and_apply_indeed_job(context, url, profile, default_loc="Chenn
                 # Skip external links
                 if any(term in btn_text_lower for term in ["company site", "external", "apply on company"]):
                     print("    [!] Detected external company site job. Skipping...")
-                    await job_page.close()
                     return False
                     
                 await apply_btn.click()
@@ -1058,30 +1072,35 @@ async def process_and_apply_indeed_job(context, url, profile, default_loc="Chenn
                     "job_id": job_id,
                     "date_applied": datetime.now().strftime("%Y-%m-%d")
                 })
-                await job_page.close()
-                return True
+                applied_success = True
             else:
                 print("    [!] Indeed Easy Apply not available (External). Skipping...")
         else:
             print(f"    [-] Excluded: Indeed Match score is {comp['score']}% (below 70% threshold).")
             
-        await job_page.close()
-        return False
+        return applied_success
     except Exception as e:
         print(f"    [!] Error processing Indeed job {url}: {e}")
+        return False
+    finally:
         if job_page:
             try:
                 await job_page.close()
             except:
                 pass
-        return False
+        print(f"    [*] Pacing delay: waiting {PAGE_GAP_SECONDS}s before next page...")
+        await asyncio.sleep(PAGE_GAP_SECONDS)
 
-async def automate_indeed_applications(profile, max_apps=10):
+async def automate_indeed_applications(profile, max_apps=10, start_time=None):
     """
     Background automation to search, score, and auto-apply to Indeed jobs.
+    Enforces 7s page gap and maximum 30-minute total execution limit.
     """
     global cancel_requested
-    print("\n[*] Starting Indeed Background Auto-Apply Engine...")
+    if start_time is None:
+        start_time = time.time()
+        
+    print(f"\n[*] Starting Indeed Background Auto-Apply Engine (Max Runtime: {MAX_RUN_TIME_SECONDS // 60}m)...")
     
     async with get_camoufox_browser(headless=IS_HEADLESS) as browser:
         context = await browser.new_context(storage_state=INDEED_SESSION_PATH) if os.path.exists(INDEED_SESSION_PATH) else await browser.new_context()
@@ -1094,10 +1113,10 @@ async def automate_indeed_applications(profile, max_apps=10):
         applied_urls = {job["url"] for job in applied_jobs if job.get("url")}
         
         for role in profile['target_roles'][:3]:
-            if cancel_requested:
+            if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                 break
             for loc in profile['preferred_locations'][:2]:
-                if cancel_requested:
+                if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                     break
                 if applied_count >= max_apps:
                     break
@@ -1109,7 +1128,7 @@ async def automate_indeed_applications(profile, max_apps=10):
                 print(f"[*] Navigating Indeed search query: {search_url}")
                 try:
                     await page.goto(search_url, wait_until="commit", timeout=25000)
-                    await page.wait_for_timeout(3000)
+                    await page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
                     await handle_cloudflare_challenge(page)
                 except Exception as e:
                     print(f"[!] Warning: Indeed connection timeout. Skipping... {e}")
@@ -1128,8 +1147,8 @@ async def automate_indeed_applications(profile, max_apps=10):
                 print(f"[*] Identified {len(urls)} Indeed job leads in this query.")
                 
                 for url in urls:
-                    if cancel_requested:
-                        print("[!] Cancellation requested. Stopping Indeed sweep...")
+                    if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
+                        print("[!] Reached 30-minute runtime limit or cancel requested. Stopping Indeed sweep...")
                         break
                     if applied_count >= max_apps:
                         break
@@ -1140,6 +1159,8 @@ async def automate_indeed_applications(profile, max_apps=10):
                     if success:
                         applied_count += 1
                         
+        elapsed_min = round((time.time() - start_time) / 60, 1)
+        print(f"[*] Indeed run complete in {elapsed_min}m. Applied to {applied_count} jobs.")
         return applied_count
 
 # =================================================================
@@ -1174,31 +1195,35 @@ async def main():
     print("[*] PIPELINE INITIALIZED: LAUNCHING AUTO-APPLY ENGAGEMENT")
     print("=================================================================")
     
+    sweep_start = time.time()
     await send_telegram_message(
         f"🚀 <b>SCM Auto-Apply Sweep Started!</b>\n\n"
         f"👤 Candidate: <b>{profile['name']}</b>\n"
         f"📍 Priority Location: <b>Bengaluru</b>\n"
         f"🎯 Match Threshold: <b>≥ 70%</b>\n"
+        f"⏱️ Pacing Delay: <b>7 seconds</b> | Max Runtime: <b>30 mins</b>\n"
         f"Scanning Naukri & Indeed..."
     )
     
-    naukri_apps = await automate_naukri_applications(profile, max_apps=25)
+    naukri_apps = await automate_naukri_applications(profile, max_apps=25, start_time=sweep_start)
     
     indeed_apps = 0
-    if os.path.exists(INDEED_SESSION_PATH):
+    if os.path.exists(INDEED_SESSION_PATH) and (time.time() - sweep_start < MAX_RUN_TIME_SECONDS):
         try:
-            indeed_apps = await automate_indeed_applications(profile, max_apps=10)
+            indeed_apps = await automate_indeed_applications(profile, max_apps=10, start_time=sweep_start)
         except Exception as e:
             print(f"[!] Warning: Could not complete Indeed auto-apply: {e}")
             
     total_apps = naukri_apps + indeed_apps
-    print(f"\n[OK] Done! Auto-applied to {total_apps} highly compatible SCM jobs (Naukri: {naukri_apps}, Indeed: {indeed_apps}) on your system!")
+    total_duration_min = round((time.time() - sweep_start) / 60, 1)
+    print(f"\n[OK] Done! Auto-applied to {total_apps} highly compatible SCM jobs in {total_duration_min}m (Naukri: {naukri_apps}, Indeed: {indeed_apps})!")
     
     await send_telegram_message(
         f"🏁 <b>Auto-Apply Sweep Complete!</b>\n\n"
         f"✅ Total Applications Submitted: <b>{total_apps}</b>\n"
         f"• Naukri: {naukri_apps}\n"
-        f"• Indeed: {indeed_apps}\n\n"
+        f"• Indeed: {indeed_apps}\n"
+        f"⏱️ Total Duration: <b>{total_duration_min} minutes</b>\n\n"
         f"Send /applied to view recent jobs and direct links."
     )
 
