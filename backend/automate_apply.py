@@ -1151,6 +1151,14 @@ async def main():
     print("[*] PIPELINE INITIALIZED: LAUNCHING AUTO-APPLY ENGAGEMENT")
     print("=================================================================")
     
+    await send_telegram_message(
+        f"🚀 <b>SCM Auto-Apply Sweep Started!</b>\n\n"
+        f"👤 Candidate: <b>{profile['name']}</b>\n"
+        f"📍 Priority Location: <b>Bengaluru</b>\n"
+        f"🎯 Match Threshold: <b>≥ 70%</b>\n"
+        f"Scanning Naukri & Indeed..."
+    )
+    
     naukri_apps = await automate_naukri_applications(profile, max_apps=25)
     
     indeed_apps = 0
@@ -1162,6 +1170,14 @@ async def main():
             
     total_apps = naukri_apps + indeed_apps
     print(f"\n[OK] Done! Auto-applied to {total_apps} highly compatible SCM jobs (Naukri: {naukri_apps}, Indeed: {indeed_apps}) on your system!")
+    
+    await send_telegram_message(
+        f"🏁 <b>Auto-Apply Sweep Complete!</b>\n\n"
+        f"✅ Total Applications Submitted: <b>{total_apps}</b>\n"
+        f"• Naukri: {naukri_apps}\n"
+        f"• Indeed: {indeed_apps}\n\n"
+        f"Send /applied to view recent jobs and direct links."
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())

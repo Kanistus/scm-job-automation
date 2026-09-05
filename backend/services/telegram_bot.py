@@ -24,9 +24,9 @@ async def send_telegram_message(text: str):
     Sends a message to the configured Telegram chat if Telegram alerts are enabled.
     """
     settings = db.get_settings()
-    enabled = settings.get("telegram_enabled") == "true"
-    token = settings.get("telegram_bot_token", "")
-    chat_id = settings.get("telegram_chat_id", "")
+    token = settings.get("telegram_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = settings.get("telegram_chat_id", "") or os.getenv("TELEGRAM_CHAT_ID", "")
+    enabled = settings.get("telegram_enabled") == "true" or bool(token and chat_id)
     
     if not enabled or not token or not chat_id:
         return False
