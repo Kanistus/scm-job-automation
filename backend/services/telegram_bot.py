@@ -58,7 +58,7 @@ async def send_telegram_message(text: str):
 class TelegramBotManager:
     def __init__(self):
         self.offset = 0
-        self.client = httpx.AsyncClient(timeout=10.0)
+        self.client = httpx.AsyncClient(timeout=45.0)
 
     async def send_msg(self, token, chat_id, text):
         url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -260,11 +260,14 @@ class TelegramBotManager:
                                 
                             await self.handle_command(token, sender_chat_id, text)
                             
+            except httpx.TimeoutException:
+                # Normal long-polling timeout when no new messages arrived; continue loop
+                continue
             except httpx.RequestError as e:
-                logger.error(f"Telegram connection issue in polling loop: {e}")
-                await asyncio.sleep(8)
+                logger.error(f"Telegram connection issue in polling loop: {repr(e)}")
+                await asyncio.sleep(5)
             except Exception as e:
-                logger.error(f"Unexpected error in Telegram polling: {e}")
+                logger.error(f"Unexpected error in Telegram polling: {repr(e)}")
                 await asyncio.sleep(5)
                 
             await asyncio.sleep(1)
