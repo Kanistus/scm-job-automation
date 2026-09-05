@@ -109,15 +109,62 @@ class TelegramBotManager:
             automate_apply.cancel_requested = True
             await self.send_msg(token, chat_id, "🛑 <b>Stopping the active automation sweep...</b>\nI will terminate the job applying loops shortly.")
             
-        # Command 4: Help/Default
+        # Command 4: System Status
+        elif any(cmd in clean_text for cmd in ["status", "info", "state", "check"]):
+            is_running = _run_lock.locked()
+            conn = db.get_db_connection()
+            total_apps = conn.execute("SELECT COUNT(*) FROM applications").fetchone()[0]
+            last_app = conn.execute("""
+                SELECT j.title, j.company, a.date_applied 
+                FROM applications a 
+                JOIN jobs j ON a.job_id = j.id 
+                ORDER BY a.id DESC LIMIT 1
+            """).fetchone()
+            conn.close()
+            
+            status_str = "🟢 <b>RUNNING (Sweeping Jobs)</b>" if is_running else "⚪ <b>IDLE (Ready)</b>"
+            last_str = f"{last_app['title']} ({last_app['date_applied']})" if last_app else "None yet"
+            
+            msg = (
+                f"📊 <b>System Status</b>\n\n"
+                f"• <b>Engine State:</b> {status_str}\n"
+                f"• <b>Total Applications:</b> {total_apps}\n"
+                f"• <b>Last Applied:</b> {last_str}\n"
+                f"• <b>Match Threshold:</b> ≥ 70%\n"
+                f"• <b>Auto-Skip Wait:</b> 20 seconds\n\n"
+                f"💡 <i>Tip: Send /run to start or /stop to cancel.</i>"
+            )
+            await self.send_msg(token, chat_id, msg)
+            
+        # Command 5: View Candidate Profile
+        elif any(cmd in clean_text for cmd in ["profile", "resume", "candidate", "whoami"]):
+            p = db.get_profile() or {}
+            roles_sample = ", ".join(p.get("target_roles", [])[:4])
+            msg = (
+                f"👤 <b>Candidate Profile</b>\n\n"
+                f"• <b>Name:</b> {p.get('name', 'Kanistus VM')}\n"
+                f"• <b>Company:</b> {p.get('current_company', 'Futurz Staffing Solutions Pvt. Ltd.')}\n"
+                f"• <b>Designation:</b> {p.get('current_designation', 'Executive')}\n"
+                f"• <b>Location:</b> {p.get('current_location', 'Bengaluru, Karnataka')}\n"
+                f"• <b>Current CTC:</b> {p.get('current_ctc', '₹4.18 LPA')}\n"
+                f"• <b>Expected CTC:</b> {p.get('expected_ctc', '6 LPA')}\n"
+                f"• <b>Notice Period:</b> {p.get('notice_period', 'Immediate')}\n"
+                f"• <b>Target Roles:</b> {roles_sample}...\n"
+                f"• <b>Certifications:</b> Lean Six Sigma White Belt, SCMF"
+            )
+            await self.send_msg(token, chat_id, msg)
+
+        # Command 6: Help / Default
         else:
             help_text = (
                 "🤖 <b>SCM Job Automation Bot</b>\n\n"
                 "Available commands:\n"
-                "• <b>run the bot</b> / <b>run the automation</b> - Start automatic Naukri/Indeed sweeps\n"
-                "• <b>stop the bot</b> / <b>cancel</b> - Stop the active automation sweep\n"
-                "• <b>applied jobs</b> / <b>list</b> - Show the list of recently applied job titles\n"
-                "• <b>help</b> - Display this help guide"
+                "• /run - Start auto-apply sweep on Naukri & Indeed\n"
+                "• /stop - Cancel the active automation sweep\n"
+                "• /applied - View list of recently applied jobs with links\n"
+                "• /status - Check current engine state & total applications\n"
+                "• /profile - View active candidate profile and salary details\n"
+                "• /help - Display this command menu"
             )
             await self.send_msg(token, chat_id, help_text)
 
