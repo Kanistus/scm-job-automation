@@ -272,51 +272,79 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
     try:
         print(f"[*] Inspecting job details: {url}")
         job_page = await context.new_page()
-        await job_page.goto(url, wait_until="commit", timeout=25000)
+        await job_page.goto(url, wait_until="domcontentloaded", timeout=25000)
         await job_page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
         
         # Gather details for scoring using multi-selector fallbacks
         title = ""
-        for t_selector in ["h1.jd-header-title", "h1.job-title", "h1", ".jd-header-title", ".job-title", "h2"]:
+        for t_selector in [
+            "h1.jd-header-title", "h1[class*='title']", "h1[class*='jd-header-title']", 
+            "[class*='header-title']", "[class*='job-title']", "h1", "h2"
+        ]:
             title_el = await job_page.query_selector(t_selector)
             if title_el:
-                title = await title_el.inner_text()
+                title = (await title_el.inner_text()).strip()
                 if title:
                     break
         if not title:
-            title = "Inventory & Operations Analyst"
+            title = "Supply Chain Analyst"
             
         desc = ""
-        for d_selector in ["section.job-desc", ".job-desc", "section.description", ".jd-desc", ".jobDescription", "body"]:
+        for d_selector in [
+            "section[class*='job-desc']", 
+            "[class*='styles_JDs']", 
+            "[class*='styles_job-desc-container']",
+            "section.styles_job-desc-container__s8Q6S",
+            "div[class*='dang-inner-html']",
+            ".dang-inner-html",
+            "section.job-desc", 
+            ".job-desc", 
+            "section.description", 
+            ".jd-desc", 
+            ".jobDescription",
+            "[class*='description']",
+            "main"
+        ]:
             desc_el = await job_page.query_selector(d_selector)
             if desc_el:
-                desc = await desc_el.inner_text()
-                if len(desc) > 100:
+                txt = (await desc_el.inner_text()).strip()
+                if len(txt) > 80:
+                    desc = txt
                     break
+                    
+        if not desc:
+            desc = await job_page.evaluate('''() => {
+                const jdContainer = document.querySelector('[class*="job-desc"], [class*="jobDescription"], [class*="jd-container"], main');
+                if (jdContainer) return jdContainer.innerText.trim();
+                const ps = Array.from(document.querySelectorAll('article p, main p, div[class*="desc"] p'));
+                if (ps.length > 0) return ps.map(p => p.innerText.trim()).join('\\n');
+                return "";
+            }''')
         
-        # Check job age on the page (skip if older than 5 days or if date is not written in days)
+        # Check job age on the page (skip if explicitly older than 5 days)
         age_el = None
-        for age_selector in [".posted-status", ".posted-date", ".date", ".jd-stats", "span:has-text('ago')", "span:has-text('Posted')"]:
+        for age_selector in [
+            "[class*='styles_jhc__header'] [class*='stat']",
+            ".posted-status", 
+            ".posted-date", 
+            ".date", 
+            ".jd-stats", 
+            "span:has-text('ago')", 
+            "span:has-text('Posted:')"
+        ]:
             age_el = await job_page.query_selector(age_selector)
             if age_el:
                 break
                 
         if age_el:
-            age_text = await age_el.inner_text()
+            age_text = (await age_el.inner_text()).strip()
             age_text_lower = age_text.lower()
-            
-            # Enforce 'posted date is in days' filter (e.g. contains 'day', 'days', 'hour', 'hours', 'just posted', 'today')
-            is_in_days = any(term in age_text_lower for term in ["day", "days", "hour", "hours", "just posted", "today"])
-            if not is_in_days:
-                print(f"    [!] Job age is not fresh/in days ({age_text.strip()}). Skipping...")
-                await job_page.close()
-                return False
-                
-            # Skip if it mentions 6 days, 7 days... up to 30 days, or "30+ days"
-            if any(f"{d} day" in age_text_lower for d in range(6, 31)) or "30+ day" in age_text_lower or "month" in age_text_lower:
-                print(f"    [!] Job age is old ({age_text.strip()}). Skipping as requested...")
-                await job_page.close()
-                return False
+            # Only check if it's not a recruiter attribution element
+            if "posted by" not in age_text_lower and "posted in" not in age_text_lower:
+                if any(f"{d} day" in age_text_lower for d in range(6, 31)) or "30+ day" in age_text_lower or "month" in age_text_lower:
+                    print(f"    [!] Job age is old ({age_text}). Skipping as requested...")
+                    await job_page.close()
+                    return False
         
         comp = calculate_compatibility(profile, desc, title, default_loc)
         
@@ -332,13 +360,46 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
             
             # Look for quick apply or standard apply button using multi-selector fallbacks
             apply_btn = None
-            for a_selector in ["button#apply-button", "button.apply-button", "button.apply", "button[class*='apply']", ".apply-button", "button:has-text('Apply')", ".applyBtn", "button:has-text('Register')"]:
+            for a_selector in [
+                "button#apply-button", 
+                "button[id*='apply']",
+                "button.apply-button", 
+                "button.apply", 
+                "button[class*='apply']", 
+                ".apply-button", 
+                "button:has-text('Apply')", 
+                ".applyBtn", 
+                "button:has-text('Register')",
+                "button:has-text('Applied')"
+            ]:
                 apply_btn = await job_page.query_selector(a_selector)
                 if apply_btn:
                     break
             if apply_btn:
-                btn_text = await apply_btn.inner_text()
+                btn_text = (await apply_btn.inner_text()).strip()
                 btn_text_lower = btn_text.lower()
+                
+                # Check if already applied on Naukri
+                if any(term in btn_text_lower for term in ["already applied", "applied"]):
+                    print(f"    [*] Job '{title}' is already applied on Naukri. Recording in DB...")
+                    job_data = {
+                        "title": title,
+                        "company": "Naukri Employer",
+                        "location": default_loc,
+                        "description": desc[:1000],
+                        "url": url,
+                        "platform": "Naukri",
+                        "match_score": comp['score'],
+                        "status": "Applied"
+                    }
+                    job_id = db.add_job(job_data)
+                    db.save_application({
+                        "job_id": job_id,
+                        "date_applied": datetime.now().strftime("%Y-%m-%d")
+                    })
+                    await job_page.close()
+                    return True
+                
                 # If it redirects to company site, skip it
                 if any(term in btn_text_lower for term in ["company site", "external", "company website", "apply on company"]):
                     print("    [!] Detected external company site job. Skipping as requested...")
@@ -410,7 +471,7 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                         continue
                         
                     # Check for text inputs or textareas inside chatbot container
-                    textarea = await container_to_query.query_selector("div.textArea[contenteditable='true'], div[class*='textArea'][contenteditable='true'], div[contenteditable='true'], textarea, input[type='text']")
+                    textarea = await container_to_query.query_selector("div.textArea[contenteditable='true'], div[class*='textArea'][contenteditable='true'], div[contenteditable='true'], textarea, input[type='text'], input[type='number'], input:not([type])")
                     if textarea and await textarea.is_visible():
                         question_text = ""
                         try:
@@ -425,12 +486,94 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                         answer = get_intelligent_text_answer(q_lower, question_text, profile)
                             
                         print(f"    [Chatbot] Answering text question '{question_text.strip()}' with: {answer}")
-                        await textarea.focus()
-                        await job_page.keyboard.type(answer)
-                        await job_page.wait_for_timeout(500)
+                        await textarea.click()
+                        await job_page.wait_for_timeout(200)
+                        try:
+                            await textarea.fill("")
+                        except:
+                            pass
+                        await job_page.keyboard.type(answer, delay=20)
+                        await job_page.wait_for_timeout(400)
                         await job_page.keyboard.press("Enter")
+                        
+                        # Look for and click Send button if present
+                        send_btn = await container_to_query.query_selector("button[class*='send'], [class*='sendBtn'], [class*='send-button'], .chatbot_send, svg[class*='send']")
+                        if send_btn and await send_btn.is_visible():
+                            try:
+                                await send_btn.click(force=True)
+                            except:
+                                pass
                         await job_page.wait_for_timeout(2500)
                         continue
+
+                    # Check for single-choice / radio buttons inside chatbot container
+                    radio_inputs = await container_to_query.query_selector_all("input[type='radio'], [role='radio'], .botRadio")
+                    if radio_inputs:
+                        print(f"    [Chatbot] Detected {len(radio_inputs)} radio button options.")
+                        question_text = ""
+                        try:
+                            questions = await container_to_query.query_selector_all(".botMsg span, .botItem span, [class*='question'] span, [class*='msg'] span")
+                            if questions:
+                                question_text = await questions[-1].inner_text()
+                        except:
+                            pass
+                        q_lower = question_text.lower()
+                        
+                        clicked_radio = False
+                        for rb in radio_inputs:
+                            rb_text = ""
+                            try:
+                                parent = await rb.evaluate_handle("el => el.parentElement")
+                                rb_text = (await parent.evaluate("el => el.innerText || el.textContent") or "").strip()
+                            except:
+                                pass
+                            if not rb_text:
+                                rb_text = (await rb.inner_text()).strip()
+                            rb_text_lower = rb_text.lower()
+                            
+                            should_click = False
+                            if "notice period" in q_lower or "notice" in q_lower:
+                                if any(term in rb_text_lower for term in ["immediate", "15 days", "less than", "0", "1 month"]):
+                                    should_click = True
+                            elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower):
+                                if any(term in rb_text_lower for term in ["4", "4.18", "4-5", "3-5", "4.0"]):
+                                    should_click = True
+                            elif "expected" in q_lower and ("ctc" in q_lower or "salary" in q_lower):
+                                if any(term in rb_text_lower for term in ["6", "5-6", "6-7", "5-7", "6.0"]):
+                                    should_click = True
+                            elif "experience" in q_lower or "years" in q_lower:
+                                if any(term in rb_text_lower for term in ["1", "1-2", "1 to 2", "1-3", "0-2"]):
+                                    should_click = True
+                            elif "location" in q_lower or "city" in q_lower:
+                                if any(term in rb_text_lower for term in ["bengaluru", "bangalore", "chennai"]):
+                                    should_click = True
+                            elif "relocate" in q_lower or "willing" in q_lower or "travel" in q_lower or "shift" in q_lower:
+                                if any(term in rb_text_lower for term in ["yes", "willing", "ready", "flexible", "agree", "day"]):
+                                    should_click = True
+                            elif "previously employed" in q_lower or "previously worked" in q_lower:
+                                if any(term in rb_text_lower for term in ["no", "never", "not"]):
+                                    should_click = True
+                                    
+                            if should_click:
+                                print(f"    [Chatbot] Selecting radio option for '{question_text.strip()}': '{rb_text}'")
+                                await rb.click(force=True)
+                                await job_page.wait_for_timeout(2000)
+                                clicked_radio = True
+                                break
+                                
+                        if not clicked_radio and radio_inputs:
+                            first_rb = radio_inputs[0]
+                            print(f"    [Chatbot] Selecting default first radio option...")
+                            await first_rb.click(force=True)
+                            await job_page.wait_for_timeout(2000)
+                            clicked_radio = True
+                            
+                        if clicked_radio:
+                            next_btn = await container_to_query.query_selector("button:has-text('Next'), button:has-text('Save'), button:has-text('Submit'), [class*='submit'], [class*='next']")
+                            if next_btn and await next_btn.is_visible():
+                                await next_btn.click(force=True)
+                                await job_page.wait_for_timeout(2000)
+                            continue
                         
                     # Check for checkboxes inside the chatbot container
                     checkbox_elements = []
@@ -481,13 +624,13 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                                 if any(term in cb_text_lower for term in ["immediate", "15 days", "less than", "1 month"]):
                                     should_check = True
                             elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower):
-                                if any(term in cb_text_lower for term in ["2", "2 lakhs", "2 lakh", "2 lpa"]):
+                                if any(term in cb_text_lower for term in ["4", "4.18", "4 lakhs", "4 lakh", "4 lpa", "3-5"]):
                                     should_check = True
                             elif "expected" in q_lower and ("ctc" in q_lower or "salary" in q_lower):
-                                if any(term in cb_text_lower for term in ["4", "4 lakhs", "4 lakh", "4 lpa", "4-5"]):
+                                if any(term in cb_text_lower for term in ["6", "6 lakhs", "6 lakh", "6 lpa", "5-7", "5-6"]):
                                     should_check = True
                             elif "ctc" in q_lower or "salary" in q_lower:
-                                if any(term in cb_text_lower for term in ["4", "4 lakhs", "4 lakh", "4 lpa", "4-5"]):
+                                if any(term in cb_text_lower for term in ["6", "4", "4.18", "4 lakhs", "6 lakhs", "4 lpa", "6 lpa"]):
                                     should_check = True
                             elif "experience" in q_lower or "years" in q_lower:
                                 if any(term in cb_text_lower for term in ["1", "one", "1 year", "1-2", "1-2 years"]):
@@ -612,13 +755,13 @@ async def process_and_apply_job(context, url, profile, default_loc="Chennai"):
                                     if any(term in opt_text_lower for term in ["immediate", "15 days", "less than", "1 month"]):
                                         should_click = True
                                 elif "current" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower):
-                                    if any(term in opt_text_lower for term in ["2", "2 lakhs", "2 lakh", "2 lpa", "2.0"]):
+                                    if any(term in opt_text_lower for term in ["4", "4.18", "4 lakhs", "4 lakh", "4 lpa", "3-5", "4.0"]):
                                         should_click = True
                                 elif "expected" in q_lower and ("ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower):
-                                    if any(term in opt_text_lower for term in ["4", "4 lakhs", "4 lakh", "4 lpa", "4.0", "4-5"]):
+                                    if any(term in opt_text_lower for term in ["6", "6 lakhs", "6 lakh", "6 lpa", "5-7", "6.0", "5-6"]):
                                         should_click = True
                                 elif "ctc" in q_lower or "salary" in q_lower or "lacs" in q_lower or "lpa" in q_lower:
-                                    if any(term in opt_text_lower for term in ["4", "4 lakhs", "4 lakh", "4 lpa", "4.0", "4-5"]):
+                                    if any(term in opt_text_lower for term in ["6", "4", "4.18", "4 lakhs", "6 lakhs", "4 lpa", "6 lpa"]):
                                         should_click = True
                                 elif "experience" in q_lower or "years" in q_lower or "po" in q_lower or "procurement" in q_lower or "order" in q_lower:
                                     if any(term in opt_text_lower for term in ["1", "one", "1 year", "1-2", "1-2 years"]):
@@ -809,28 +952,53 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
         
         # A. FIRST RUN: NAVIGATE AND APPLY TO PERSONALIZED RECOMMENDED JOBS FOR YOU
         try:
-            print("\n[*] STEP 1: Crawling personalized Recommended Jobs page...")
-            rec_url = "https://www.naukri.com/recommendedjobs"
-            await page.goto(rec_url, wait_until="commit", timeout=25000)
+            print("\n[*] STEP 1: Crawling personalized Recommended Jobs portal...")
+            rec_url = "https://www.naukri.com/mnjuser/recommendedjobs"
+            await page.goto(rec_url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
             
-            # Extract recommended job card links using multi-selectors
-            rec_cards = []
-            for selector in ["a.title", "a.job-title", "a[class*='title']", ".jobTuple a.title", "article a.title", "a[href*='/job-listings']"]:
-                rec_cards = await page.query_selector_all(selector)
-                if rec_cards and len(rec_cards) > 0:
-                    print(f"[*] Found recommended jobs card using selector: {selector}")
-                    break
-                    
+            # Check if human verification prompt is present
+            body_text = await page.evaluate("() => document.body.innerText")
+            if "let us know you’re human" in body_text.lower() or "check the box" in body_text.lower():
+                print("[!] Human verification prompt on Recommended Jobs. Waiting up to 25s...")
+                await send_telegram_message(
+                    "⚠️ <b>Naukri Verification Prompt Detected</b>\n\n"
+                    "Please solve the verification box in the open browser window.\n"
+                    "Waiting 25 seconds before proceeding..."
+                )
+                for _ in range(12):
+                    await asyncio.sleep(2)
+                    b_txt = await page.evaluate("() => document.body.innerText")
+                    if "let us know you’re human" not in b_txt.lower():
+                        print("[+] Verification cleared!")
+                        break
+            
+            # Extract recommended job card elements
+            rec_cards = await page.query_selector_all("article.jobTuple, [class*='jobTuple'], article, [class*='cust-job-tuple']")
+            print(f"[*] Identified {len(rec_cards)} recommended job cards in member portal.")
+            
             rec_urls = []
-            for card in rec_cards[:15]:
-                href = await card.get_attribute("href")
-                if href:
-                    if href.startswith("/"):
-                        href = "https://www.naukri.com" + href
-                    rec_urls.append(href)
+            for card in rec_cards[:25]:
+                try:
+                    # 1. Try finding direct link inside card
+                    a_el = await card.query_selector("a[href*='job-listings'], a.title, a[class*='title']")
+                    href = await a_el.get_attribute("href") if a_el else ""
                     
-            print(f"[*] Identified {len(rec_urls)} recommended job leads.")
+                    # 2. Try data-job-id attribute
+                    if not href:
+                        job_id = await card.get_attribute("data-job-id")
+                        if job_id:
+                            href = f"https://www.naukri.com/job-listings-{job_id}"
+                            
+                    if href:
+                        if href.startswith("/"):
+                            href = "https://www.naukri.com" + href
+                        if href not in rec_urls:
+                            rec_urls.append(href)
+                except Exception:
+                    pass
+                    
+            print(f"[*] Extracted {len(rec_urls)} recommended job URLs.")
             
             for url in rec_urls:
                 if cancel_requested:
@@ -844,22 +1012,23 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
                 if url in applied_urls:
                     print(f"    [*] Job already applied to. Skipping Recommended URL: {url}")
                     continue
-                success = await process_and_apply_job(context, url, profile, default_loc="Bangalore (Recommended)")
+                success = await process_and_apply_job(context, url, profile, default_loc="Bengaluru (Recommended)")
                 if success:
                     applied_count += 1
+                    applied_urls.add(url)
         except Exception as e:
             print(f"[!] Warning: Could not complete Recommended Jobs scan: {e}")
 
         # B. SECOND RUN: NAVIGATE AND APPLY TO STANDARD SEARCH QUERIES
         if applied_count < max_apps and not cancel_requested and (time.time() - start_time < MAX_RUN_TIME_SECONDS):
             print("\n[*] STEP 2: Running standard SCM search queries...")
-            for role in profile['target_roles']:
+            for role in profile['target_roles'][:10]:
                 if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                     break
-                for loc in profile['preferred_locations']:
+                for loc in profile['preferred_locations'][:3]:
                     if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                         break
-                    for exp in [0, 1, 2]:
+                    for exp in [1, 0, 2]:
                         if cancel_requested or (time.time() - start_time >= MAX_RUN_TIME_SECONDS):
                             break
                         if applied_count >= max_apps:
@@ -870,15 +1039,33 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
                         
                         print(f"[*] Navigating search query: {search_url}")
                         try:
-                            await page.goto(search_url, wait_until="commit", timeout=25000)
+                            await page.goto(search_url, wait_until="domcontentloaded", timeout=25000)
                             await page.wait_for_timeout(PAGE_GAP_SECONDS * 1000)
                         except Exception as e:
                             print(f"[!] Warning: Connection timeout/drop on {search_url}. Skipping this query... {e}")
                             continue
                         
+                        # Check for human verification challenge
+                        b_text = await page.evaluate("() => document.body.innerText")
+                        if "let us know you’re human" in b_text.lower() or "check the box" in b_text.lower():
+                            print(f"[!] Human verification prompt on {search_query}. Waiting 20s...")
+                            for _ in range(10):
+                                await asyncio.sleep(2)
+                                b_chk = await page.evaluate("() => document.body.innerText")
+                                if "let us know you’re human" not in b_chk.lower():
+                                    print("[+] Verification solved!")
+                                    break
+                            else:
+                                print("[!] Verification not solved. Skipping to next search query...")
+                                continue
+                        
                         # Extract job card links using multi-selector fallbacks
                         job_cards = []
-                        for selector in ["a.title", "a.job-title", "a[class*='title']", ".jobTuple a.title", "article a.title", "a.title.fw500", "a[href*='/job-listings']"]:
+                        for selector in [
+                            "a.title", "a.job-title", "a[class*='title']", 
+                            "article a.title", "a[href*='/job-listings']", 
+                            "[class*='cust-job-tuple'] a", "[class*='srp-jobtuple'] a"
+                        ]:
                             job_cards = await page.query_selector_all(selector)
                             if job_cards and len(job_cards) > 0:
                                 print(f"[*] Successfully identified search cards using selector: {selector}")
@@ -890,7 +1077,8 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
                             if href:
                                 if href.startswith("/"):
                                     href = "https://www.naukri.com" + href
-                                urls.append(href)
+                                if href not in urls:
+                                    urls.append(href)
                                 
                         print(f"[*] Identified {len(urls)} job leads in this query.")
                         
@@ -906,6 +1094,7 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
                             success = await process_and_apply_job(context, url, profile, default_loc=loc)
                             if success:
                                 applied_count += 1
+                                applied_urls.add(url)
                                 
         elapsed_min = round((time.time() - start_time) / 60, 1)
         print(f"[*] Naukri run complete in {elapsed_min}m. Applied to {applied_count} jobs.")

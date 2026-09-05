@@ -67,13 +67,12 @@ def clean_text(text):
 
 def calculate_compatibility(profile, job_description, title, location):
     """
-    Calculates job compatibility score (0-100) based on strict 6-part weighted criteria:
-    1. Supply Chain Relevance (25 pts)
-    2. Process Improvement & Excellence (25 pts)
-    3. Analytics (15 pts)
-    4. Automation / Technology (15 pts)
-    5. Career Growth / Title Fit (10 pts)
-    6. Experience & Location Fit (10 pts)
+    Calculates job compatibility score (0-100) based on candidate's target roles and SCM expertise:
+    1. Target Role & Title Relevance (Max 30 pts)
+    2. Supply Chain Domain Relevance (Max 30 pts)
+    3. Analytics & Reporting (Max 15 pts)
+    4. Process Improvement & ERP/Systems (Max 15 pts)
+    5. Location & Experience Fit (Max 10 pts)
     """
     jd_clean = clean_text(job_description)
     title_clean = clean_text(title)
@@ -83,87 +82,83 @@ def calculate_compatibility(profile, job_description, title, location):
     matched_keywords = []
     missing_keywords = []
     
-    # 0. Check Rejection Guardrails (-60 pts penalty)
+    # 0. Check Rejection Guardrails
     is_rejected = any(term in title_clean or term in jd_clean for term in EXCLUDED_TERMS)
     if is_rejected:
         return {
             "score": 15,
             "fits": False,
-            "reasons": ["Excluded: Role matches generic sales, telecalling, customer support, or non-analytical manual supervision."],
+            "reasons": ["Excluded: Role matches generic sales, telecalling, customer support, pure software dev, or non-analytical manual supervision."],
             "matched_keywords": [],
             "missing_keywords": ["Supply Chain Process Improvement"]
         }
 
-    # 1. Supply Chain Relevance (Max 25 pts)
-    sc_score = 0
-    for kw in KEYWORDS_DB["supply_chain"]:
-        if kw in jd_clean or kw in title_clean:
-            sc_score += 3
-            matched_keywords.append(kw.title())
-    sc_score = min(25, sc_score)
-    if sc_score >= 15:
-        reasons.append("High Match: Directly involves Supply Chain, Inventory, 3PL, or Logistics operations (25/25).")
+    # 1. Target Role / Title Relevance (Max 30 pts)
+    title_score = 0
+    target_roles = [r.lower() for r in profile.get("target_roles", [])] if profile else []
+    if any(tr in title_clean for tr in target_roles) or any(title_clean in tr for tr in target_roles if len(title_clean) > 6):
+        title_score = 30
+        reasons.append("Exact Target Role Match: Directly matches candidate's primary career goals.")
+    elif any(k in title_clean for k in ["supply chain", "inventory", "procurement", "logistics", "operations analyst", "process analyst", "fulfillment", "warehouse", "materials"]):
+        title_score = 25
+        reasons.append("High Priority Title Match: Strongly aligned operational/analytical domain.")
+    elif any(k in title_clean for k in ["operations", "analyst", "executive", "associate", "specialist", "coordinator"]):
+        title_score = 15
+        reasons.append("Moderate Title Match: General analytical or operational role.")
     else:
-        reasons.append("Moderate Match: Partial supply chain domain overlap.")
+        title_score = 5
 
-    # 2. Process Improvement & Operational Excellence (Max 25 pts)
-    pi_score = 0
-    for kw in KEYWORDS_DB["process_improvement"]:
+    # 2. Supply Chain Relevance (Max 30 pts)
+    sc_score = 0
+    sc_keywords = KEYWORDS_DB["supply_chain"] + [
+        "vendor", "vendor management", "materials management", "dispatch", 
+        "order management", "distribution", "freight", "inward", "outward", "stock"
+    ]
+    for kw in sc_keywords:
         if kw in jd_clean or kw in title_clean:
-            pi_score += 4
+            sc_score += 5
             matched_keywords.append(kw.title())
-    pi_score = min(25, pi_score)
-    if pi_score >= 16:
-        reasons.append("High Match: Strong focus on Process Improvement, RCA, Six Sigma, and Operational Excellence (25/25).")
-    elif pi_score > 0:
-        reasons.append("Moderate Match: Mentions process optimization or KPI tracking.")
+    sc_score = min(30, sc_score)
+    if sc_score >= 15:
+        reasons.append("High Domain Match: Directly involves Supply Chain, Inventory, 3PL, Procurement, or Logistics.")
     else:
-        missing_keywords.append("Process Improvement / Lean Six Sigma")
+        reasons.append("Moderate Domain Match: Partial supply chain domain overlap.")
 
     # 3. Analytics & Data Tools (Max 15 pts)
     an_score = 0
-    for kw in KEYWORDS_DB["analytics"]:
+    an_keywords = KEYWORDS_DB["analytics"] + ["vlookup", "pivot", "spreadsheet", "analytics"]
+    for kw in an_keywords:
         if kw in jd_clean or kw in title_clean:
-            an_score += 3
+            an_score += 5
             matched_keywords.append(kw.title())
     an_score = min(15, an_score)
-    if an_score >= 9:
-        reasons.append("High Match: Strong alignment with Excel, SQL, KPI dashboards, and data analytics (15/15).")
+    if an_score >= 10:
+        reasons.append("Analytics Match: Strong alignment with Excel, KPI dashboards, reporting, and metrics.")
 
-    # 4. Automation & Technology (Max 15 pts)
-    auto_score = 0
-    for kw in KEYWORDS_DB["automation"]:
+    # 4. Process Improvement & ERP / Systems (Max 15 pts)
+    proc_score = 0
+    proc_keywords = KEYWORDS_DB["process_improvement"] + KEYWORDS_DB["automation"]
+    for kw in proc_keywords:
         if kw in jd_clean or kw in title_clean:
-            auto_score += 4
+            proc_score += 5
             matched_keywords.append(kw.title())
-    auto_score = min(15, auto_score)
-    if auto_score >= 8:
-        reasons.append("High Match: Involves AI, process automation, ERP systems (SAP/WMS), or digital transformation.")
+    proc_score = min(15, proc_score)
+    if proc_score >= 10:
+        reasons.append("Process & Systems Match: Involves ERP (SAP/WMS), SOPs, process optimization, or automation.")
 
-    # 5. Career Growth / Priority Title Alignment (Max 10 pts)
-    title_score = 0
-    if any(p_title in title_clean for p_title in PRIORITY_TITLES):
-        title_score = 10
-        reasons.append("Priority Title Match: Directly aligns with Supply Chain + Process Improvement career path.")
-    elif any(s_title in title_clean for s_title in SECONDARY_TITLES):
-        title_score = 7
-        reasons.append("Secondary Title Match: Highly relevant operational role.")
-    else:
-        title_score = 4
-
-    # 6. Experience Fit & Location (Max 10 pts)
+    # 5. Experience Fit & Location (Max 10 pts)
     exp_loc_score = 0
     if "bengaluru" in loc_clean or "bangalore" in loc_clean:
         exp_loc_score += 5
-        reasons.append("Location Match: Bengaluru (Priority #1 Location).")
-    elif "remote" in loc_clean or "hybrid" in loc_clean or "chennai" in loc_clean or "india" in loc_clean:
+        reasons.append("Location Match: Bengaluru (Priority Location).")
+    elif any(l in loc_clean for l in ["chennai", "remote", "hybrid", "india"]):
         exp_loc_score += 4
-        reasons.append(f"Location Match: {location} (Acceptable Indian location).")
+        reasons.append(f"Location Match: {location} (Acceptable location).")
     else:
         exp_loc_score += 2
 
     # Check Experience level
-    if any(term in jd_clean or term in title_clean for term in ["0-2", "1-3", "0-3", "entry", "associate", "analyst", "executive", "junior"]):
+    if any(term in jd_clean or term in title_clean for term in ["0-2", "1-3", "0-3", "1-2", "0-1", "entry", "associate", "analyst", "executive", "junior"]):
         exp_loc_score += 5
     elif any(term in title_clean for term in ["director", "vp", "head of", "principal", "chief"]):
         exp_loc_score -= 5
@@ -171,7 +166,7 @@ def calculate_compatibility(profile, job_description, title, location):
     else:
         exp_loc_score += 3
 
-    total_score = sc_score + pi_score + an_score + auto_score + title_score + exp_loc_score
+    total_score = title_score + sc_score + an_score + proc_score + exp_loc_score
     total_score = max(0, min(100, total_score))
 
     matched_keywords = list(set(matched_keywords))
