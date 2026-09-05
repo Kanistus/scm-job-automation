@@ -277,3 +277,11 @@ async def stop_telegram_bot():
 async def restart_telegram_bot():
     await stop_telegram_bot()
     await start_telegram_bot()
+
+if __name__ == "__main__":
+    print("[*] Starting Standalone Telegram Bot Polling Listener...")
+    bot = TelegramBotManager()
+    try:
+        asyncio.run(bot.poll_updates())
+    except KeyboardInterrupt:
+        print("\n[*] Telegram Bot Polling stopped by user.")
