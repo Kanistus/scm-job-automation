@@ -259,6 +259,9 @@ class TelegramBotManager:
                                 continue
                                 
                             await self.handle_command(token, sender_chat_id, text)
+                elif response.status_code == 409:
+                    logger.warning("Telegram Bot Conflict (409): Another bot instance or clone is running with this token! Backing off for 15 seconds...")
+                    await asyncio.sleep(15)
                             
             except httpx.TimeoutException:
                 # Normal long-polling timeout when no new messages arrived; continue loop
