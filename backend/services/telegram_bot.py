@@ -3,6 +3,15 @@ import os
 import sys
 import logging
 import httpx
+import re
+
+# Configure UTF-8 encoding on Windows to prevent Errno 22 and UnicodeEncodeError
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,11 +63,17 @@ class TelegramBotManager:
     async def send_msg(self, token, chat_id, text):
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
-            await self.client.post(url, json={
+            resp = await self.client.post(url, json={
                 "chat_id": chat_id,
                 "text": text,
                 "parse_mode": "HTML"
             })
+            if resp.status_code != 200:
+                plain_text = re.sub(r"<[^>]+>", "", text)
+                await self.client.post(url, json={
+                    "chat_id": chat_id,
+                    "text": plain_text
+                })
         except Exception as e:
             logger.error(f"Telegram bot send_msg failed: {e}")
 
@@ -203,8 +218,11 @@ class TelegramBotManager:
                 await self.send_msg(token, chat_id, f"🎯 <b>Auto-apply sweep completed successfully!</b> Total jobs applied: {total}")
                 
             except Exception as e:
-                logger.error(f"Error in remote Telegram automation execution: {e}")
-                await self.send_msg(token, chat_id, f"❌ Error running automation: {str(e)}")
+                import traceback
+                tb = traceback.format_exc()
+                logger.error(f"Error in remote Telegram automation execution: {e}\n{tb}")
+                clean_err = str(e).replace("<", "").replace(">", "")
+                await self.send_msg(token, chat_id, f"❌ <b>Error running automation:</b> {clean_err}")
 
     async def poll_updates(self):
         logger.info("Starting Telegram Bot getUpdates polling loop...")

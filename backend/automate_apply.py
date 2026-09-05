@@ -4,6 +4,14 @@ import os
 import json
 from datetime import datetime
 
+# Configure UTF-8 encoding on Windows to prevent Errno 22 and UnicodeEncodeError
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Include backend path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -210,6 +218,17 @@ async def setup_portal_session(platform, login_url, session_path):
         print(f"[!] Running in CI environment and session file '{os.path.basename(session_path)}' is missing. Skipping interactive setup.")
         return
 
+    # Check if running in an interactive terminal to prevent Errno 22 on input()
+    is_interactive = False
+    try:
+        is_interactive = sys.stdin and hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+    except Exception:
+        is_interactive = False
+
+    if not is_interactive:
+        print(f"[!] Non-interactive mode detected. Cannot prompt for manual login to {platform}. Skipping setup.")
+        return
+
     print(f"\n=================================================================")
     print(f"[*] SETTING UP ACTIVE SESSION FOR: {platform.upper()}")
     print(f"=================================================================")
@@ -224,7 +243,11 @@ async def setup_portal_session(platform, login_url, session_path):
         await page.goto(login_url)
         
         # Wait for user to log in and press enter in console
-        await asyncio.get_event_loop().run_in_executor(None, input, "Press [Enter] here ONLY AFTER you have successfully logged in in the browser...")
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, input, "Press [Enter] here ONLY AFTER you have successfully logged in in the browser...")
+        except (OSError, EOFError) as e:
+            print(f"[!] Console input unavailable ({e}). Waiting 30 seconds for manual login...")
+            await asyncio.sleep(30)
         
         # Save storage state
         await context.storage_state(path=session_path)
