@@ -155,6 +155,29 @@ def get_intelligent_text_answer(q_lower, question_text, profile):
 
 IS_HEADLESS = os.getenv("CI_HEADLESS", "false").lower() == "true" or os.getenv("CI") is not None
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def get_camoufox_browser(headless=IS_HEADLESS):
+    """
+    Safely launches Camoufox browser with automatic binary fetch fallback and Playwright fallback.
+    """
+    try:
+        async with AsyncCamoufox(headless=headless) as browser:
+            yield browser
+    except Exception as e:
+        print(f"[!] Camoufox launch warning: {e}. Attempting auto-fetch binaries...")
+        try:
+            import subprocess
+            subprocess.run([sys.executable, "-m", "camoufox", "fetch"], check=True)
+            async with AsyncCamoufox(headless=headless) as browser:
+                yield browser
+        except Exception as e2:
+            print(f"[!] Falling back to standard Playwright Firefox: {e2}")
+            async with async_playwright() as pw:
+                browser = await pw.firefox.launch(headless=headless)
+                yield browser
+
 async def get_browser_context(pw, session_path, headless=None):
     """
     Launches browser, loading saved login cookies if present.
@@ -739,7 +762,7 @@ async def automate_naukri_applications(profile, max_apps=25):
 
     print("\n[*] Starting Naukri Background Auto-Apply Engine...")
     
-    async with AsyncCamoufox(headless=IS_HEADLESS) as browser:
+    async with get_camoufox_browser(headless=IS_HEADLESS) as browser:
         context = await browser.new_context(storage_state=NAUKRI_SESSION_PATH) if os.path.exists(NAUKRI_SESSION_PATH) else await browser.new_context()
         page = await context.new_page()
         
@@ -1037,7 +1060,7 @@ async def automate_indeed_applications(profile, max_apps=10):
     global cancel_requested
     print("\n[*] Starting Indeed Background Auto-Apply Engine...")
     
-    async with AsyncCamoufox(headless=IS_HEADLESS) as browser:
+    async with get_camoufox_browser(headless=IS_HEADLESS) as browser:
         context = await browser.new_context(storage_state=INDEED_SESSION_PATH) if os.path.exists(INDEED_SESSION_PATH) else await browser.new_context()
         page = await context.new_page()
         
