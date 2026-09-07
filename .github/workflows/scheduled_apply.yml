@@ -1,0 +1,88 @@
+name: Scheduled SCM Job Auto-Apply
+
+on:
+  schedule:
+    # IST is UTC + 5:30
+    # 08:00 AM IST -> 02:30 AM UTC
+    - cron: '30 2 * * *'
+    # 02:00 PM IST -> 08:30 AM UTC
+    - cron: '30 8 * * *'
+    # 08:00 PM IST -> 14:30 PM UTC (02:30 PM UTC)
+    - cron: '30 14 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+concurrency:
+  group: scm-job-apply
+  cancel-in-progress: false
+
+jobs:
+  scheduled-apply:
+    name: Auto-Apply Sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt
+          python -m camoufox fetch
+          playwright install --with-deps firefox
+
+      - name: Restore candidate session files
+        env:
+          NAUKRI_SESSION_B64: ${{ secrets.NAUKRI_SESSION_B64 }}
+          NAUKRI_SESSION_JSON: ${{ secrets.NAUKRI_SESSION_JSON }}
+          INDEED_SESSION_B64: ${{ secrets.INDEED_SESSION_B64 }}
+        run: |
+          mkdir -p backend/data/sessions
+          if [ -n "$NAUKRI_SESSION_B64" ]; then
+            echo "$NAUKRI_SESSION_B64" | base64 --decode > backend/data/sessions/naukri_session.json
+            echo "Restored Naukri session from NAUKRI_SESSION_B64."
+          elif [ -n "$NAUKRI_SESSION_JSON" ]; then
+            echo "$NAUKRI_SESSION_JSON" > backend/data/sessions/naukri_session.json
+            echo "Restored Naukri session from NAUKRI_SESSION_JSON."
+          else
+            echo "::warning ::No Naukri session secret found (NAUKRI_SESSION_B64 or NAUKRI_SESSION_JSON)."
+          fi
+
+          if [ -n "$INDEED_SESSION_B64" ]; then
+            echo "$INDEED_SESSION_B64" | base64 --decode > backend/data/sessions/indeed_session.json
+            echo "Restored Indeed session."
+          fi
+
+      - name: Initialize candidate profile database
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python backend/seed_profile.py
+          python -c "import os, database as db; db.init_db(); db.save_setting('telegram_enabled', 'true'); db.save_setting('telegram_bot_token', os.getenv('TELEGRAM_BOT_TOKEN', '')); db.save_setting('telegram_chat_id', os.getenv('TELEGRAM_CHAT_ID', ''))"
+
+      - name: Run SCM Job Auto-Apply Sweep
+        env:
+          CI: 'true'
+          CI_HEADLESS: 'true'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python backend/automate_apply.py
+
+      - name: Upload execution database and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-apply-database-${{ github.run_id }}
+          path: |
+            backend/data/app_data.db
+          retention-days: 7
