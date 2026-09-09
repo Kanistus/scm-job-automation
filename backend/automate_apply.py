@@ -39,6 +39,19 @@ INDEED_SESSION_PATH = os.path.join(SESSION_DIR, "indeed_session.json")
 
 cancel_requested = False
 
+# Run Metrics & Verification Diagnostics
+RUN_METRICS = {
+    "naukri_searched": 0,
+    "naukri_applied": 0,
+    "naukri_skipped": 0,
+    "indeed_searched": 0,
+    "indeed_applied": 0,
+    "indeed_skipped": 0,
+    "human_verifications": 0,
+    "status": "Success",
+    "details": []
+}
+
 def get_intelligent_text_answer(q_lower, question_text, profile):
     """
     Question Classification & Normalization Engine based on Kanistus VM's official Naukri Q&A Database.
@@ -960,10 +973,12 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
             # Check if human verification prompt is present
             body_text = await page.evaluate("() => document.body.innerText")
             if "let us know you’re human" in body_text.lower() or "check the box" in body_text.lower():
+                RUN_METRICS["human_verifications"] += 1
+                RUN_METRICS["details"].append("Naukri Recommended Jobs human verification detected.")
                 print("[!] Human verification prompt on Recommended Jobs. Waiting up to 25s...")
                 await send_telegram_message(
                     "⚠️ <b>Naukri Verification Prompt Detected</b>\n\n"
-                    "Please solve the verification box in the open browser window.\n"
+                    "Human verification requested on Naukri.\n"
                     "Waiting 25 seconds before proceeding..."
                 )
                 for _ in range(12):
@@ -1048,6 +1063,8 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
                         # Check for human verification challenge
                         b_text = await page.evaluate("() => document.body.innerText")
                         if "let us know you’re human" in b_text.lower() or "check the box" in b_text.lower():
+                            RUN_METRICS["human_verifications"] += 1
+                            RUN_METRICS["details"].append(f"Naukri search '{role}' verification detected.")
                             print(f"[!] Human verification prompt on {search_query}. Waiting 20s...")
                             for _ in range(10):
                                 await asyncio.sleep(2)
@@ -1057,6 +1074,7 @@ async def automate_naukri_applications(profile, max_apps=25, start_time=None):
                                     break
                             else:
                                 print("[!] Verification not solved. Skipping to next search query...")
+                                RUN_METRICS["naukri_skipped"] += 1
                                 continue
                         
                         # Extract job card links using multi-selector fallbacks
@@ -1138,6 +1156,8 @@ async def handle_cloudflare_challenge(page, timeout_sec=60):
         pass
         
     if is_cf:
+        RUN_METRICS["human_verifications"] += 1
+        RUN_METRICS["details"].append("Indeed Cloudflare Turnstile verification detected.")
         print("\n[!] WARNING: Indeed Cloudflare WAF / Turnstile verification page detected!")
         print("[!] Action Required: Please click the 'Verify you are human' checkbox on your screen to proceed...")
         await send_telegram_message(
@@ -1394,27 +1414,55 @@ async def main():
         f"Scanning Naukri & Indeed..."
     )
     
-    naukri_apps = await automate_naukri_applications(profile, max_apps=25, start_time=sweep_start)
-    
+    naukri_apps = 0
     indeed_apps = 0
-    if os.path.exists(INDEED_SESSION_PATH) and (time.time() - sweep_start < MAX_RUN_TIME_SECONDS):
+    try:
+        naukri_apps = await automate_naukri_applications(profile, max_apps=25, start_time=sweep_start)
+        
+        if os.path.exists(INDEED_SESSION_PATH) and (time.time() - sweep_start < MAX_RUN_TIME_SECONDS):
+            try:
+                indeed_apps = await automate_indeed_applications(profile, max_apps=10, start_time=sweep_start)
+            except Exception as e:
+                print(f"[!] Warning: Could not complete Indeed auto-apply: {e}")
+                RUN_METRICS["details"].append(f"Indeed sweep warning: {str(e)[:200]}")
+    except Exception as e:
+        print(f"[!] Critical error during sweep: {e}")
+        RUN_METRICS["status"] = "Failed"
+        RUN_METRICS["details"].append(f"Critical error: {str(e)[:200]}")
+    finally:
+        total_apps = naukri_apps + indeed_apps
+        total_duration_min = round((time.time() - sweep_start) / 60, 1)
+        
+        RUN_METRICS["naukri_applied"] = naukri_apps
+        RUN_METRICS["indeed_applied"] = indeed_apps
+        RUN_METRICS["total_applied"] = total_apps
+        RUN_METRICS["duration_minutes"] = total_duration_min
+        
+        # Save output/report file
+        report_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "report.json")
         try:
-            indeed_apps = await automate_indeed_applications(profile, max_apps=10, start_time=sweep_start)
-        except Exception as e:
-            print(f"[!] Warning: Could not complete Indeed auto-apply: {e}")
-            
-    total_apps = naukri_apps + indeed_apps
-    total_duration_min = round((time.time() - sweep_start) / 60, 1)
-    print(f"\n[OK] Done! Auto-applied to {total_apps} highly compatible SCM jobs in {total_duration_min}m (Naukri: {naukri_apps}, Indeed: {indeed_apps})!")
-    
-    await send_telegram_message(
-        f"🏁 <b>Auto-Apply Sweep Complete!</b>\n\n"
-        f"✅ Total Applications Submitted: <b>{total_apps}</b>\n"
-        f"• Naukri: {naukri_apps}\n"
-        f"• Indeed: {indeed_apps}\n"
-        f"⏱️ Total Duration: <b>{total_duration_min} minutes</b>\n\n"
-        f"Send /applied to view recent jobs and direct links."
-    )
+            with open(report_path, "w", encoding="utf-8") as rf:
+                json.dump(RUN_METRICS, rf, indent=2)
+            print(f"[+] Application report saved to {report_path}")
+        except Exception as re_err:
+            print(f"[!] Warning saving report: {re_err}")
+
+        print(f"\n[OK] Sweep complete: Auto-applied to {total_apps} jobs in {total_duration_min}m (Naukri: {naukri_apps}, Indeed: {indeed_apps})!")
+        
+        status_emoji = "✅" if RUN_METRICS["status"] == "Success" else "⚠️"
+        await send_telegram_message(
+            f"🏁 <b>Auto-Apply Sweep Summary</b>\n\n"
+            f"<b>Overall Status:</b> {status_emoji} {RUN_METRICS['status']}\n"
+            f"👤 Candidate: <b>{profile['name']}</b>\n"
+            f"⏱️ Duration: <b>{total_duration_min} mins</b>\n\n"
+            f"📊 <b>Application Breakdown:</b>\n"
+            f"• <b>Naukri Applications:</b> {naukri_apps}\n"
+            f"• <b>Indeed Applications:</b> {indeed_apps}\n"
+            f"• <b>Total Successful Applications:</b> {total_apps}\n"
+            f"• <b>Failed / Skipped:</b> {RUN_METRICS['naukri_skipped'] + RUN_METRICS['indeed_skipped']}\n"
+            f"• <b>Human Verification Events:</b> {RUN_METRICS['human_verifications']}\n\n"
+            f"Send /applied to view recently applied jobs and links."
+        )
 
 if __name__ == "__main__":
     asyncio.run(main())
