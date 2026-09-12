@@ -43,22 +43,44 @@ jobs:
         run: |
           mkdir -p backend/data/sessions
           
-          # Restore Naukri session
-          if [ -n "$NAUKRI_SESSION_B64" ]; then
-            echo "$NAUKRI_SESSION_B64" | base64 --decode > backend/data/sessions/naukri_session.json
-            echo "[+] Successfully restored Naukri session from NAUKRI_SESSION_B64."
-          elif [ -n "$NAUKRI_SESSION_JSON" ]; then
-            echo "$NAUKRI_SESSION_JSON" > backend/data/sessions/naukri_session.json
-            echo "[+] Successfully restored Naukri session from NAUKRI_SESSION_JSON."
-          else
-            echo "::warning ::No NAUKRI_SESSION_B64 or NAUKRI_SESSION_JSON secret found in repository secrets."
-          fi
+          # Restore Naukri session (supports base64, gzip base64, or raw JSON)
+          python -c "
+          import os, base64, gzip
+          b64 = os.getenv('NAUKRI_SESSION_B64', '')
+          raw_json = os.getenv('NAUKRI_SESSION_JSON', '')
+          target = 'backend/data/sessions/naukri_session.json'
+          if b64:
+              try:
+                  decoded = base64.b64decode(b64)
+                  content = gzip.decompress(decoded) if not decoded.strip().startswith(b'{') else decoded
+                  with open(target, 'wb') as f:
+                      f.write(content)
+                  print('[+] Successfully restored Naukri session from NAUKRI_SESSION_B64.')
+              except Exception as e:
+                  print(f'[!] Error decoding NAUKRI_SESSION_B64: {e}')
+          elif raw_json:
+              with open(target, 'w') as f:
+                  f.write(raw_json)
+              print('[+] Successfully restored Naukri session from NAUKRI_SESSION_JSON.')
+          else:
+              print('::warning ::No NAUKRI_SESSION_B64 or NAUKRI_SESSION_JSON secret found in repository secrets.')
+          "
 
-          # Restore Indeed session if present
-          if [ -n "$INDEED_SESSION_B64" ]; then
-            echo "$INDEED_SESSION_B64" | base64 --decode > backend/data/sessions/indeed_session.json
-            echo "[+] Successfully restored Indeed session from INDEED_SESSION_B64."
-          fi
+          # Restore Indeed session if present (supports base64 or gzip base64)
+          python -c "
+          import os, base64, gzip
+          b64 = os.getenv('INDEED_SESSION_B64', '')
+          target = 'backend/data/sessions/indeed_session.json'
+          if b64:
+              try:
+                  decoded = base64.b64decode(b64)
+                  content = gzip.decompress(decoded) if not decoded.strip().startswith(b'{') else decoded
+                  with open(target, 'wb') as f:
+                      f.write(content)
+                  print('[+] Successfully restored Indeed session from INDEED_SESSION_B64.')
+              except Exception as e:
+                  print(f'[!] Error decoding INDEED_SESSION_B64: {e}')
+          "
 
           # Initialize candidate profile and inject database settings
           PYTHONPATH=backend python backend/seed_profile.py
